@@ -192,6 +192,9 @@ test("keeps stream controls centered independently of the left and right compose
       const ink = (icon: typeof attach) =>
         icon.evaluate((element) => getComputedStyle(element).stroke);
       const attachmentInk = await ink(attach.locator("svg"));
+      const toolbarWeight = await attach.evaluate(
+        (element) => getComputedStyle(element).fontWeight,
+      );
       async function checkCounts(taskCount: string | undefined, draftCount: string) {
         for (const [button, label] of [
           [tasks, taskCount],
@@ -211,7 +214,7 @@ test("keeps stream controls centered independently of the left and right compose
             text: name === "narrow" ? label.split(" ")[0] : label,
             fits: true,
             color: attachmentInk,
-            weight: "500",
+            weight: toolbarWeight,
           });
           expect(await ink(button.locator(":scope > svg"))).toBe(attachmentInk);
           const hit = (await button.boundingBox())!;

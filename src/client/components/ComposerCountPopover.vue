@@ -91,7 +91,6 @@ defineExpose({ close: () => popover.value?.hidePopover() });
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.8rem;
-  font-weight: 500;
 }
 
 @media (prefers-color-scheme: dark) {

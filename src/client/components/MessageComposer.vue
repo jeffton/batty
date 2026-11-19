@@ -3,6 +3,20 @@ import { Paperclip, SendHorizontal } from "@lucide/vue";
 import { blockAppReload } from "@/client/lib/app-updates";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from "vue";
 import ComposerQueuedPrompts from "@/client/components/ComposerQueuedPrompts.vue";
+import DraftsControl from "@/client/components/DraftsControl.vue";
+import {
+  beginSubmission,
+  consumeDraft,
+  deleteDraft,
+  finishSubmission,
+  readComposerSlot,
+  saveDraft,
+  writeComposerSlot,
+  type Draft,
+  type DraftPayload,
+} from "@/client/lib/drafts-db";
+import { getComposeTab, recoverClosedTabs } from "@/client/lib/compose-tab";
+import { useDrafts } from "@/client/lib/use-drafts";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import TasksControl from "@/client/components/TasksControl.vue";
 import { clearSessionDraft, readSessionDraft, writeSessionDraft } from "@/client/lib/session-draft";
@@ -22,11 +36,12 @@ const props = defineProps<{
   offline?: boolean;
   error?: string;
   sessionKey?: string;
+  draftsEnabled?: boolean;
   queuedPrompts?: QueuedPrompt[];
 }>();
 
 const emit = defineEmits<{
-  submit: [text: string, files: File[]];
+  submit: [text: string, files: File[], retryId?: string];
   stop: [];
   removeQueuedPrompt: [prompt: QueuedPrompt];
 }>();
@@ -45,12 +60,188 @@ const dragging = ref(false);
 const maxInputHeight = ref(240);
 const inputFocused = ref(false);
 const actionsDisabled = computed(() => Boolean(props.disabled || props.actionsDisabled));
+const attachmentDisabled = computed(() =>
+  Boolean(props.disabled || (!props.draftsEnabled && props.actionsDisabled)),
+);
 const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
+const draftControl = ref<InstanceType<typeof DraftsControl>>();
+const draftsEnabled = computed(() => Boolean(props.draftsEnabled && props.sessionKey));
+const {
+  drafts,
+  error: syncError,
+  changed,
+  wake,
+} = useDrafts(
+  draftsEnabled,
+  computed(() => !props.offline),
+);
+const draftBusy = ref(false);
+const slotLoading = ref(false);
+const composeLocked = computed(() => draftBusy.value || slotLoading.value);
+const draftError = ref("");
+const slotError = ref("");
+const recoveries = shallowRef<Draft[]>([]);
+let retryPayload: DraftPayload | undefined;
+let hydrationVersion = 0;
+let lastSlotWrite: Promise<void> = Promise.resolve();
+
+let mounted = true;
+
+async function slotKey(sessionKey: string): Promise<string[]> {
+  return [await getComposeTab(), sessionKey];
+}
+
+async function recoverOldComposers(): Promise<void> {
+  wake();
+  try {
+    await recoverClosedTabs(await getComposeTab());
+    if (mounted) changed();
+  } catch (error) {
+    reportDraftError(error);
+  }
+}
+
+async function journalSubmission(session: string, value: DraftPayload) {
+  draftBusy.value = true;
+  const draft = newDraft(value);
+  try {
+    await lastSlotWrite;
+    const tab = await getComposeTab();
+    await beginSubmission(tab, session, draft);
+    if (mounted && props.sessionKey === session) clear();
+    return { tab, session, draft };
+  } finally {
+    draftBusy.value = false;
+  }
+}
+
+async function recoverSubmission(tab: string, session: string, draft: Draft) {
+  const occupied =
+    !mounted ||
+    props.sessionKey !== session ||
+    text.value.length > 0 ||
+    files.value.length > 0 ||
+    pendingFiles.value > 0 ||
+    composeLocked.value;
+  if (occupied) {
+    await finishSubmission(tab, session, draft, "draft");
+    if (mounted) changed();
+    return;
+  }
+  draftBusy.value = true;
+  try {
+    await lastSlotWrite;
+    await finishSubmission(tab, session, draft, "compose");
+    if (mounted && props.sessionKey === session) applyPayload(draft);
+  } finally {
+    draftBusy.value = false;
+  }
+}
+
+function payload(): DraftPayload {
+  const current = { text: text.value, files: [...files.value] };
+  return retryPayload?.retryId &&
+    retryPayload.text === current.text &&
+    retryPayload.files.length === current.files.length &&
+    retryPayload.files.every((file, index) => file === current.files[index])
+    ? { ...current, retryId: retryPayload.retryId }
+    : current;
+}
+
+function newDraft(value: DraftPayload): Draft {
+  return { ...value, id: crypto.randomUUID(), createdAt: Date.now() };
+}
+
+function reportDraftError(error: unknown): void {
+  draftError.value = error instanceof Error ? error.message : String(error);
+}
+
+function persistSlot(sessionKey: string, value: DraftPayload): void {
+  if (!props.draftsEnabled) return;
+  lastSlotWrite = lastSlotWrite.then(async () => {
+    try {
+      await writeComposerSlot(await slotKey(sessionKey), value);
+      clearSessionDraft(sessionKey);
+      slotError.value = "";
+    } catch (error) {
+      slotError.value = `Could not save the message locally: ${String(error)}`;
+    }
+  });
+}
+
+function applyPayload(value: DraftPayload): void {
+  retryPayload = value.retryId ? value : undefined;
+  text.value = value.text;
+  files.value = [...value.files];
+  if (props.sessionKey) draftFilesBySessionKey.set(props.sessionKey, files.value);
+  resetFileInput();
+  void nextTick(scheduleTextareaHeightSync);
+}
+
+async function moveDraft(id?: string): Promise<void> {
+  if (!props.sessionKey || props.disabled || composeLocked.value || pendingFiles.value > 0) return;
+  const sessionKey = props.sessionKey;
+  const current = payload();
+  if (id == null && !hasPayload.value) return;
+  draftBusy.value = true;
+  draftError.value = "";
+  try {
+    await lastSlotWrite;
+    const slot = await slotKey(sessionKey);
+    const displaced = current.text.length || current.files.length ? newDraft(current) : undefined;
+    const selected = id ? await consumeDraft(slot, id, displaced) : undefined;
+    if (id && !selected) throw new Error("This draft has already been removed.");
+    if (!id && displaced) await saveDraft(displaced, slot);
+    changed();
+    if (props.sessionKey === sessionKey) {
+      applyPayload(selected ?? { text: "", files: [] });
+      clearSessionDraft(sessionKey);
+      if (selected) {
+        draftControl.value?.close();
+        void nextTick(() => textarea.value?.focus());
+      }
+    }
+  } catch (error) {
+    reportDraftError(error);
+    changed();
+  } finally {
+    draftBusy.value = false;
+  }
+}
+
+async function removeDraft(id: string): Promise<void> {
+  if (draftBusy.value) return;
+  draftBusy.value = true;
+  draftError.value = "";
+  try {
+    await deleteDraft(id);
+    changed();
+  } catch (error) {
+    reportDraftError(error);
+  } finally {
+    draftBusy.value = false;
+  }
+}
+
+async function recoverDraft(draft: Draft): Promise<void> {
+  try {
+    await saveDraft(draft);
+    recoveries.value = recoveries.value.filter((item) => item.id !== draft.id);
+    if (!recoveries.value.length) draftError.value = "";
+    changed();
+  } catch (error) {
+    if (!recoveries.value.some((item) => item.id === draft.id))
+      recoveries.value = [...recoveries.value, draft];
+    reportDraftError(new Error(`Could not save the failed message to Drafts: ${String(error)}`));
+  }
+}
 const unblockReload = blockAppReload(
   () =>
     text.value.length > 0 ||
     files.value.length > 0 ||
     pendingFiles.value > 0 ||
+    recoveries.value.length > 0 ||
+    draftBusy.value ||
     [...draftFilesBySessionKey.values()].some((draft) => draft.length > 0),
 );
 onBeforeUnmount(unblockReload);
@@ -124,7 +315,7 @@ function resetFileInput(): void {
 }
 
 async function addFiles(next: FileList | File[]): Promise<void> {
-  if (actionsDisabled.value) {
+  if (attachmentDisabled.value || composeLocked.value) {
     return;
   }
 
@@ -135,7 +326,8 @@ async function addFiles(next: FileList | File[]): Promise<void> {
   pendingFiles.value += 1;
   try {
     await Promise.all(
-      incoming.map(async (file) => {
+      [...incoming, ...files.value].map(async (file) => {
+        if (fileHashes.has(file)) return;
         const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
         const hash = Array.from(new Uint8Array(digest), (byte) =>
           byte.toString(16).padStart(2, "0"),
@@ -160,6 +352,7 @@ async function addFiles(next: FileList | File[]): Promise<void> {
     files.value = [...files.value, ...added];
     if (props.sessionKey) {
       draftFilesBySessionKey.set(props.sessionKey, [...files.value]);
+      persistSlot(props.sessionKey, payload());
     }
   } catch (error) {
     if (generation === fileGeneration) {
@@ -173,15 +366,17 @@ async function addFiles(next: FileList | File[]): Promise<void> {
 }
 
 function removeFile(index: number): void {
+  if (composeLocked.value) return;
   files.value = files.value.filter((_, fileIndex) => fileIndex !== index);
   if (props.sessionKey) {
     draftFilesBySessionKey.set(props.sessionKey, [...files.value]);
+    persistSlot(props.sessionKey, payload());
   }
 }
 
 function removeQueuedPrompt(prompt: QueuedPrompt): void {
   emit("removeQueuedPrompt", prompt);
-  if (prompt.kind === "followUp" && text.value.trim().length === 0) {
+  if (prompt.kind === "followUp" && text.value.trim().length === 0 && !composeLocked.value) {
     text.value = prompt.text;
     void nextTick(() => {
       scheduleTextareaHeightSync();
@@ -244,8 +439,30 @@ function loadDraft(sessionKey?: string): void {
   pendingFiles.value = 0;
   fileError.value = "";
   hydratingDraft = true;
+  const version = ++hydrationVersion;
+  retryPayload = undefined;
   text.value = sessionKey ? readSessionDraft(sessionKey) : "";
   files.value = sessionKey ? [...(draftFilesBySessionKey.get(sessionKey) ?? [])] : [];
+  slotLoading.value = Boolean(draftsEnabled.value);
+  if (sessionKey && draftsEnabled.value) {
+    void lastSlotWrite.then(async () => {
+      try {
+        const stored = await readComposerSlot(await slotKey(sessionKey));
+        if (version !== hydrationVersion) return;
+        if (stored) {
+          hydratingDraft = true;
+          applyPayload(stored);
+          await nextTick();
+          hydratingDraft = false;
+        }
+      } catch (error) {
+        if (version === hydrationVersion)
+          slotError.value = `Could not load the message: ${String(error)}`;
+      } finally {
+        if (version === hydrationVersion) slotLoading.value = false;
+      }
+    });
+  }
   resetFileInput();
   void nextTick(() => {
     hydratingDraft = false;
@@ -263,43 +480,53 @@ function clear(): void {
   if (props.sessionKey) {
     clearSessionDraft(props.sessionKey);
     draftFilesBySessionKey.delete(props.sessionKey);
+    persistSlot(props.sessionKey, { text: "", files: [] });
   }
+  retryPayload = undefined;
   text.value = "";
   files.value = [];
   resetFileInput();
   void nextTick(scheduleTextareaHeightSync);
 }
 
-function restore(sessionKey: string, textValue: string, nextFiles: File[]): void {
-  if (
-    props.sessionKey === sessionKey &&
-    (text.value.length > 0 || files.value.length > 0 || pendingFiles.value > 0)
-  ) {
+async function restore(
+  sessionKey: string,
+  textValue: string,
+  nextFiles: File[],
+  retryId?: string,
+): Promise<void> {
+  const restored = { text: textValue, files: nextFiles, retryId };
+  const active = props.sessionKey === sessionKey;
+  const occupied =
+    text.value.length > 0 ||
+    files.value.length > 0 ||
+    pendingFiles.value > 0 ||
+    composeLocked.value;
+  if ((active && occupied) || (props.draftsEnabled && !active)) {
+    if (props.draftsEnabled) await recoverDraft(newDraft(restored));
     return;
   }
 
-  writeSessionDraft(sessionKey, textValue);
+  if (!props.draftsEnabled) writeSessionDraft(sessionKey, textValue);
   draftFilesBySessionKey.set(sessionKey, [...nextFiles]);
-  if (props.sessionKey !== sessionKey) {
-    return;
-  }
+  persistSlot(sessionKey, restored);
+  if (!active) return;
 
   clearDraftSaveTimeout();
   queuedDraftSessionKey = undefined;
   queuedDraftText = "";
-  text.value = textValue;
-  files.value = [...nextFiles];
-  resetFileInput();
+  applyPayload(restored);
   lastDraftSavedAt = Date.now();
-  void nextTick(scheduleTextareaHeightSync);
 }
 
 function runAction(): void {
-  if (!hasPayload.value || actionsDisabled.value || pendingFiles.value > 0) {
+  if (!hasPayload.value || actionsDisabled.value || composeLocked.value || pendingFiles.value > 0) {
     return;
   }
 
-  emit("submit", text.value, [...files.value]);
+  const { text: message, files: attachments, retryId } = payload();
+  if (retryId) emit("submit", message, attachments, retryId);
+  else emit("submit", message, attachments);
 }
 
 function triggerActionEarly(event: PointerEvent): void {
@@ -324,7 +551,7 @@ function triggerActionClick(): void {
 function onDrop(event: DragEvent): void {
   event.preventDefault();
   dragging.value = false;
-  if (actionsDisabled.value || !event.dataTransfer?.files?.length) {
+  if (attachmentDisabled.value || !event.dataTransfer?.files?.length) {
     return;
   }
 
@@ -345,7 +572,7 @@ function onTextareaKeydown(event: KeyboardEvent): void {
 }
 
 function openFilePicker(): void {
-  if (actionsDisabled.value) {
+  if (attachmentDisabled.value || composeLocked.value) {
     return;
   }
 
@@ -367,12 +594,14 @@ watch(
 
 watch(text, () => {
   if (!hydratingDraft) {
-    scheduleDraftSave();
+    if (!props.draftsEnabled) scheduleDraftSave();
+    else if (props.sessionKey && !composeLocked.value) persistSlot(props.sessionKey, payload());
   }
   void nextTick(scheduleTextareaHeightSync);
 });
 
 onMounted(() => {
+  if (draftsEnabled.value) void recoverOldComposers();
   updateMaxInputHeight();
   scheduleTextareaHeightSync();
   if (typeof ResizeObserver !== "undefined" && textarea.value) {
@@ -383,6 +612,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  mounted = false;
+  hydrationVersion += 1;
   flushDraftSave();
   textareaResizeObserver?.disconnect();
   if (textareaHeightAnimationFrame != null) {
@@ -391,7 +622,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", updateMaxInputHeight);
 });
 
-defineExpose({ clear, restore });
+defineExpose({ clear, restore, journalSubmission, recoverSubmission });
 </script>
 
 <template>
@@ -404,7 +635,27 @@ defineExpose({ clear, restore });
     @drop="onDrop"
   >
     <div class="composer__inner">
-      <div v-if="props.error || fileError || props.offline" class="composer__notices">
+      <div
+        v-if="
+          props.error || fileError || props.offline || draftError || slotError || recoveries.length
+        "
+        class="composer__notices"
+      >
+        <p
+          v-if="draftError || slotError"
+          class="composer__notice composer__notice--error"
+          role="alert"
+        >
+          {{ draftError || slotError }}
+        </p>
+        <button
+          v-for="recovery in recoveries"
+          :key="recovery.id"
+          type="button"
+          @click="recoverDraft(recovery)"
+        >
+          Retry saving failed message to Drafts
+        </button>
         <p v-if="props.error" class="composer__notice composer__notice--error">{{ props.error }}</p>
         <p v-if="fileError" class="composer__notice composer__notice--error">{{ fileError }}</p>
         <p v-if="props.offline" class="composer__notice">Offline. Draft saved locally</p>
@@ -412,7 +663,7 @@ defineExpose({ clear, restore });
 
       <ComposerQueuedPrompts
         :prompts="props.queuedPrompts"
-        :disabled="props.disabled"
+        :disabled="props.disabled || composeLocked"
         @remove="removeQueuedPrompt"
       />
 
@@ -422,7 +673,7 @@ defineExpose({ clear, restore });
           :key="`${file.name}-${index}`"
           class="composer__chip"
           type="button"
-          :disabled="props.disabled"
+          :disabled="props.disabled || composeLocked"
           @click="removeFile(index)"
         >
           {{ file.name }} ×
@@ -441,19 +692,23 @@ defineExpose({ clear, restore });
         autocorrect="on"
         spellcheck="true"
         :disabled="props.disabled"
+        :readonly="composeLocked"
         @focus="inputFocused = true"
         @blur="inputFocused = false"
         @input="syncTextareaHeight"
         @keydown="onTextareaKeydown"
       />
 
-      <div class="composer__actions-row">
+      <div
+        class="composer__actions-row"
+        :class="{ 'composer__actions-row--drafts': draftsEnabled }"
+      >
         <button
           class="composer__icon-button"
           type="button"
           aria-label="Add files"
           title="Add files"
-          :disabled="actionsDisabled"
+          :disabled="attachmentDisabled || composeLocked"
           @click="openFilePicker"
         >
           <Paperclip :size="18" />
@@ -468,6 +723,20 @@ defineExpose({ clear, restore });
             :compacting="props.compacting"
           />
         </div>
+
+        <DraftsControl
+          v-if="draftsEnabled"
+          ref="draftControl"
+          :drafts="drafts"
+          :busy="draftBusy"
+          :can-save="hasPayload && !props.disabled && !composeLocked && pendingFiles === 0"
+          :can-take="!props.disabled && !composeLocked && pendingFiles === 0"
+          :error="syncError"
+          @save="moveDraft()"
+          @open="recoverOldComposers"
+          @select="moveDraft"
+          @remove="removeDraft"
+        />
 
         <div class="composer__stop-slot">
           <StreamingStopControl
@@ -492,7 +761,7 @@ defineExpose({ clear, restore });
           type="button"
           aria-label="Send prompt"
           title="Send prompt"
-          :disabled="!hasPayload || actionsDisabled || pendingFiles > 0"
+          :disabled="!hasPayload || actionsDisabled || composeLocked || pendingFiles > 0"
           @pointerdown="triggerActionEarly($event)"
           @click="triggerActionClick()"
         >
@@ -506,7 +775,7 @@ defineExpose({ clear, restore });
       hidden
       type="file"
       multiple
-      :disabled="actionsDisabled"
+      :disabled="attachmentDisabled || composeLocked"
       @change="onFileInputChange"
     />
   </form>
@@ -635,6 +904,10 @@ defineExpose({ clear, restore });
   padding: 0 calc(var(--safe-area-right) + 0.4rem) 0 calc(var(--safe-area-left) + 0.4rem);
 }
 
+.composer__actions-row--drafts {
+  grid-template-columns: 44px minmax(44px, 6rem) minmax(88px, max-content) 44px 44px;
+}
+
 .composer__icon-button {
   padding: 0;
   border: 0;
@@ -670,7 +943,7 @@ defineExpose({ clear, restore });
   min-width: 0;
 }
 
-.composer__tasks-slot :deep(.tasks-control) {
+.composer__tasks-slot :deep(.composer-count-control) {
   width: 100%;
   overflow: hidden;
 }

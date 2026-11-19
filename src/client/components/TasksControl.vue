@@ -91,16 +91,16 @@ function sessionToggle(taskId: string, event: Event): void {
 <template>
   <button
     v-if="tasks.length || tasksOpen"
-    class="tasks-control chrome-button"
+    class="tasks-control composer-count-control chrome-button"
     type="button"
     :popovertarget="popoverId"
     aria-label="Running tasks"
     aria-haspopup="dialog"
   >
     <Activity :size="17" aria-hidden="true" />
-    <span class="tasks-control__info">
+    <span class="composer-count-control__info">
       <strong>{{ tasks.length }} {{ tasks.length === 1 ? "task" : "tasks" }}</strong>
-      <span class="tasks-control__status">
+      <span class="composer-count-control__status">
         <span v-if="hasRunningTasks" class="spinner tasks-control__spinner" aria-hidden="true" />
         <CircleAlert
           v-if="props.memoryError"
@@ -114,15 +114,15 @@ function sessionToggle(taskId: string, event: Event): void {
   <BasePopover
     ref="tasksPopover"
     :id="popoverId"
-    class="tasks-popover"
+    class="composer-list-popover"
     floating
     anchor-up
     role="dialog"
     aria-label="Running tasks"
     @toggle="tasksOpen = ($event as ToggleEvent).newState === 'open'"
   >
-    <header class="tasks-popover__header">Running tasks</header>
-    <div class="tasks-popover__list">
+    <header class="composer-list-popover__header">Running tasks</header>
+    <div class="composer-list-popover__list">
       <component
         :is="task.sessionId ? 'button' : 'article'"
         v-for="task in tasks"
@@ -147,7 +147,7 @@ function sessionToggle(taskId: string, event: Event): void {
         <CircleAlert v-else-if="task.error" :size="16" aria-hidden="true" />
         <span v-else class="spinner" aria-hidden="true" />
       </component>
-      <p v-if="!tasks.length" class="tasks-popover__empty">No running tasks.</p>
+      <p v-if="!tasks.length" class="composer-list-popover__empty">No running tasks.</p>
     </div>
   </BasePopover>
   <template v-for="task in sessionTasks" :key="task.id">
@@ -162,8 +162,8 @@ function sessionToggle(taskId: string, event: Event): void {
   </template>
 </template>
 
-<style scoped>
-.tasks-control {
+<style>
+.composer-count-control {
   min-width: 44px;
   min-height: 44px;
   flex-shrink: 1;
@@ -177,7 +177,7 @@ function sessionToggle(taskId: string, event: Event): void {
   cursor: pointer;
 }
 
-.tasks-control__info {
+.composer-count-control__info {
   --button-icon-size: 0.7rem;
   min-width: 0;
   display: grid;
@@ -186,7 +186,7 @@ function sessionToggle(taskId: string, event: Event): void {
   line-height: 1.05;
 }
 
-.tasks-control__info strong {
+.composer-count-control__info strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -194,11 +194,51 @@ function sessionToggle(taskId: string, event: Event): void {
   color: var(--color-text-strong);
 }
 
-.tasks-control__status {
+.composer-count-control__status {
   position: relative;
   height: 0.7rem;
 }
 
+.composer-list-popover {
+  display: none;
+}
+
+.composer-list-popover:popover-open {
+  display: flex;
+  flex-direction: column;
+  width: min(22rem, calc(100vw - 1rem));
+  --anchored-popover-max-height: 24rem;
+  max-height: 24rem;
+  overflow: hidden;
+  padding: 0;
+}
+
+.composer-list-popover__header {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  padding: 0.9rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--color-chrome-border);
+  background: var(--color-bg-instance);
+  color: var(--color-text-strong);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.composer-list-popover__list {
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--color-bg-app);
+}
+
+.composer-list-popover__empty {
+  margin: 0;
+  padding: 0.5rem;
+  color: var(--color-text-subtle);
+}
+</style>
+
+<style scoped>
 .tasks-control__warning {
   position: absolute;
   top: 0;
@@ -214,38 +254,6 @@ function sessionToggle(taskId: string, event: Event): void {
   width: 0.7rem;
   height: 0.7rem;
   border-width: 1.5px;
-}
-
-:global(.tasks-popover) {
-  display: none;
-}
-
-:global(.tasks-popover:popover-open) {
-  display: flex;
-  flex-direction: column;
-  width: min(22rem, calc(100vw - 1rem));
-  --anchored-popover-max-height: 24rem;
-  max-height: 24rem;
-  overflow: hidden;
-  padding: 0;
-}
-
-.tasks-popover__header {
-  position: relative;
-  z-index: 1;
-  flex-shrink: 0;
-  padding: 0.9rem 1rem 0.75rem;
-  border-bottom: 1px solid var(--color-chrome-border);
-  background: var(--color-bg-instance);
-  color: var(--color-text-strong);
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.tasks-popover__list {
-  min-height: 0;
-  overflow-y: auto;
-  background: var(--color-bg-app);
 }
 
 .tasks-popover__task {
@@ -313,11 +321,5 @@ button.tasks-popover__task:focus-visible {
   color: var(--color-error);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.tasks-popover__empty {
-  margin: 0;
-  padding: 0.5rem;
-  color: var(--color-text-subtle);
 }
 </style>

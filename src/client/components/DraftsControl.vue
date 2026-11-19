@@ -1,0 +1,173 @@
+<script setup lang="ts">
+import { FilePlus, Files, PencilLine, Trash2 } from "@lucide/vue";
+import { computed, ref, useId } from "vue";
+import BasePopover from "./BasePopover.vue";
+import type { Draft } from "@/client/lib/drafts-db";
+
+const props = defineProps<{
+  drafts: Draft[];
+  canSave: boolean;
+  busy: boolean;
+  canTake: boolean;
+  error: string;
+}>();
+const emit = defineEmits<{ save: []; open: []; select: [id: string]; remove: [id: string] }>();
+const id = `drafts-${useId()}`;
+const popover = ref<InstanceType<typeof BasePopover>>();
+const count = computed(
+  () => `${props.drafts.length} ${props.drafts.length === 1 ? "draft" : "drafts"}`,
+);
+defineExpose({ close: () => popover.value?.hidePopover() });
+</script>
+
+<template>
+  <div class="drafts-control">
+    <button
+      type="button"
+      class="chrome-button drafts-control__save"
+      title="Save to drafts"
+      aria-label="Save to drafts"
+      :disabled="!props.canSave"
+      @click="emit('save')"
+    >
+      <FilePlus :size="17" aria-hidden="true" />
+    </button>
+    <button
+      type="button"
+      class="chrome-button composer-count-control"
+      :popovertarget="id"
+      :title="count"
+      :aria-label="`Drafts: ${count}`"
+      aria-haspopup="dialog"
+    >
+      <Files :size="17" aria-hidden="true" />
+      <span class="composer-count-control__info">
+        <strong>{{ count }}</strong>
+        <span class="composer-count-control__status" />
+      </span>
+    </button>
+    <BasePopover
+      :id="id"
+      ref="popover"
+      class="composer-list-popover"
+      floating
+      anchor-up
+      role="dialog"
+      aria-label="Drafts"
+      @toggle="($event as ToggleEvent).newState === 'open' && emit('open')"
+    >
+      <header class="composer-list-popover__header">Drafts</header>
+      <div class="composer-list-popover__list">
+        <p v-if="props.error" class="drafts-control__error" role="status">{{ props.error }}</p>
+        <p v-if="!props.drafts.length" class="composer-list-popover__empty">No drafts.</p>
+        <div v-for="draft in props.drafts" :key="draft.id" class="drafts-control__entry">
+          <button
+            type="button"
+            class="drafts-control__take"
+            :disabled="!props.canTake"
+            @click="emit('select', draft.id)"
+          >
+            <PencilLine :size="16" aria-hidden="true" />
+            <span>
+              <strong>{{
+                draft.text.trim() || draft.files.map((file) => file.name).join(", ")
+              }}</strong>
+              <small v-if="draft.files.length && draft.text.trim()">
+                {{ draft.files.map((file) => file.name).join(", ") }}
+              </small>
+            </span>
+          </button>
+          <button
+            class="chrome-button drafts-control__delete"
+            type="button"
+            title="Delete draft"
+            :aria-label="`Delete draft: ${draft.text.trim() || draft.files.map((file) => file.name).join(', ')}`"
+            :aria-disabled="props.busy"
+            @click="!props.busy && emit('remove', draft.id)"
+          >
+            <Trash2 :size="16" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    </BasePopover>
+  </div>
+</template>
+
+<style scoped>
+.drafts-control {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.drafts-control__save,
+.drafts-control__delete {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  padding: 0;
+}
+
+.drafts-control__save:disabled {
+  opacity: 0.4;
+}
+
+.drafts-control__entry {
+  display: flex;
+  align-items: center;
+  padding-right: 0.25rem;
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.drafts-control__take {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 0;
+  flex: 1;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  color: var(--color-text);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.drafts-control__take:focus-visible,
+.drafts-control__delete:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.drafts-control__take svg {
+  flex-shrink: 0;
+}
+
+.drafts-control__take span {
+  display: grid;
+  min-width: 0;
+}
+
+.drafts-control__take span > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drafts-control__error {
+  padding: 0.5rem 1rem;
+  margin: 0;
+  color: var(--color-error);
+}
+
+@media (hover: hover) {
+  .drafts-control__take:hover:not(:disabled) {
+    background: var(--color-bg-elevated-soft);
+  }
+}
+</style>

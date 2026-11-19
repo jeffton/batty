@@ -27,6 +27,11 @@ export function createAuthToken(secret: string, ttlMs = 1000 * 60 * 60 * 24 * 30
   return `${encodedPayload}.${signature}`;
 }
 
+// Tokens rotate on login; the installation has exactly one authenticated owner.
+export function draftOwnerScope(secret: string): string {
+  return sign(secret, "draft-owner");
+}
+
 export function authCacheScope(
   secret: string,
   token: string,

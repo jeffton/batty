@@ -20,6 +20,23 @@ import App from "@/client/App.vue";
 import ChatHeader from "@/client/components/ChatHeader.vue";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import { useAppStore } from "./app";
+import type { DraftPayload, Draft } from "@/client/lib/drafts-db";
+vi.mock("@/client/lib/drafts-db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/client/lib/drafts-db")>()),
+  finishSubmission: vi.fn(),
+}));
+
+function testComposer(restore = vi.fn()) {
+  return {
+    journalSubmission: async (session: string, value: DraftPayload) => ({
+      tab: "test-tab",
+      session,
+      draft: { ...value, id: crypto.randomUUID(), createdAt: 1 },
+    }),
+    recoverSubmission: async (_tab: string, session: string, draft: Draft) =>
+      restore(session, draft.text, draft.files, draft.retryId),
+  };
+}
 import { RpcError } from "@/shared/rpc";
 vi.mock("@/client/lib/main-cache", () => ({
   CacheSuspendedError: class CacheSuspendedError extends Error {},
@@ -1120,7 +1137,7 @@ describe("optimistic prompt reconciliation", () => {
       props: ["error"],
       emits: ["submit", "removeQueuedPrompt"],
       setup(_, { expose }) {
-        expose({ clear: vi.fn(), restore });
+        expose(testComposer(restore));
       },
       template: "<div>{{ error }}</div>",
     });
@@ -1496,7 +1513,7 @@ describe("optimistic prompt reconciliation", () => {
     submit("Keep this", files);
     await flushPromises();
     expect(pending()).toHaveLength(0);
-    expect(restore).toHaveBeenCalledWith("main", "Keep this", files);
+    expect(restore).toHaveBeenCalledWith("main", "Keep this", files, expect.any(String));
     expect(wrapper!.text()).toContain("Upload failed");
   });
 });
@@ -1512,7 +1529,7 @@ describe("restored prompt submission", () => {
       name: "MessageComposer",
       emits: ["submit"],
       setup(_, { expose }) {
-        expose({ clear: vi.fn(), restore });
+        expose(testComposer(restore));
       },
       template: "<div />",
     });
@@ -1548,11 +1565,12 @@ describe("restored prompt submission", () => {
         submissionId: "receipt",
         sessionId: "main",
       });
+    const restore = vi.fn();
     const composer = defineComponent({
       name: "MessageComposer",
       emits: ["submit"],
       setup(_, { expose }) {
-        expose({ clear: vi.fn(), restore: vi.fn() });
+        expose(testComposer(restore));
       },
       template: "<div />",
     });
@@ -1567,7 +1585,8 @@ describe("restored prompt submission", () => {
     child.vm.$emit("submit", "Only once", []);
     await flushPromises();
     const originalId = vi.mocked(api.submitMainPrompt).mock.calls[0]![3];
-    child.vm.$emit("submit", "Only once", []);
+    expect(restore).toHaveBeenCalledWith("main", "Only once", [], originalId);
+    child.vm.$emit("submit", "Only once", restore.mock.calls[0]![2], restore.mock.calls[0]![3]);
     await flushPromises();
     expect(api.submitMainPrompt).toHaveBeenCalledTimes(2);
     expect(vi.mocked(api.submitMainPrompt).mock.calls[1]![3]).toBe(originalId);

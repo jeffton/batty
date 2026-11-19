@@ -7,6 +7,7 @@ import { syncPushSubscription, unregisterPushSubscription } from "@/client/lib/p
 import { reportBrowserError } from "@/client/lib/browser-errors";
 import { applyAppAppearance } from "@/client/lib/appearance";
 import * as api from "@/client/lib/api";
+import { registerDraftScope } from "@/client/lib/drafts-db";
 import { applyServerEvent, applySessionResponse } from "@/client/lib/session-events";
 import { prependHistoryPage } from "@/client/lib/session-pagination";
 import { createSessionConnection } from "@/client/lib/session-connection";
@@ -66,7 +67,8 @@ export const useAppStore = defineStore("app", {
           if (authenticationError && this.lastError === authenticationError)
             this.lastError = undefined;
           authenticationError = undefined;
-          if (!payload.authenticated) await this.bootstrap(payload);
+          if (!payload.authenticated || this.draftScope !== payload.draftScope)
+            await this.bootstrap(payload);
         } catch (error) {
           if (epoch !== localStorage.getItem(CACHE_EPOCH_KEY) || !this.authenticated) return;
           if (isConnectionError(error)) return;
@@ -114,6 +116,8 @@ export const useAppStore = defineStore("app", {
           if (cached) {
             if (authEpoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;
             cachedBootstrap = cached.bootstrap;
+            this.draftScope = cached.bootstrap.draftScope;
+            registerDraftScope(this.draftScope);
             this.authenticated = true;
             this.bootstrapped = true;
             this.settings = cached.bootstrap.settings;
@@ -149,6 +153,12 @@ export const useAppStore = defineStore("app", {
           this.activeSession = undefined;
         }
         if (payload.authenticated) registerMainCacheBootstrap();
+        if (payload.authenticated && !registerDraftScope(payload.draftScope)) {
+          // IndexedDB operations in this document belong to its original owner.
+          window.location.reload();
+          return;
+        }
+        this.draftScope = payload.authenticated ? payload.draftScope : undefined;
         cachedBootstrap = payload.authenticated ? payload : undefined;
         if (cachedBootstrap) authorizePreviewCache(cachedBootstrap);
         this.authenticated = payload.authenticated;

@@ -17,6 +17,7 @@ export function createAppState() {
     orchestrationVersion: 0,
     cronVersion: 0,
     authenticated: false,
+    draftScope: undefined as string | undefined,
     bootstrapped: false,
     bootstrapFailed: false,
     auth: {

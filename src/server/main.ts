@@ -10,13 +10,14 @@ import { loadConfig, resolveBattyDir } from "./config";
 import { stateDirPath } from "./options";
 import { listWorkspaces } from "./workspaces";
 import { PasskeyAuthService, formatSetupCode } from "./passkeys";
-import { verifyAuthToken, authCacheScope } from "./auth";
+import { verifyAuthToken, authCacheScope, draftOwnerScope } from "./auth";
 import { TranscriptImages, imagePreview } from "./transcript-images";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { registerAuthRoutes } from "./routes/auth";
 import { appBasePath, renderAppShell } from "./app-shell";
 import { createBrowserErrorReporter } from "./browser-errors";
 import { registerCronRoutes } from "./routes/cron";
+import { registerDraftRoutes } from "./routes/drafts";
 import { registerSiteRoutes } from "./routes/sites";
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
 import { cloudBrowserAvailable, registerCloudBrowserLauncher } from "./cloud-browser-launcher";
@@ -109,6 +110,8 @@ const reportBrowserError = createBrowserErrorReporter(
   path.join(stateDirPath(config.battyDir), "browser-errors.json"),
 );
 registerCronRoutes(app, runtime.orchestration);
+const draftScope = draftOwnerScope(config.authSecret);
+await registerDraftRoutes(app, stateDirPath(config.battyDir), draftScope);
 registerSiteRoutes(routeContext);
 const closeCloudBrowsers = await registerCloudBrowserRoutes(
   app,
@@ -156,7 +159,9 @@ app.get("/api/version", async (_request, reply) => {
 });
 app.get("/api/bootstrap", async (request) => ({
   authenticated: request.auth,
-  ...(request.auth ? authCacheScope(config.authSecret, request.cookies[config.cookieName]!) : {}),
+  ...(request.auth
+    ? { ...authCacheScope(config.authSecret, request.cookies[config.cookieName]!), draftScope }
+    : {}),
   auth: request.auth
     ? await passkeys.getStatus()
     : {

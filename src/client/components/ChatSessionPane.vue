@@ -4,8 +4,9 @@ import ChatHeader from "@/client/components/ChatHeader.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
 import { getMain, listRunningSubagents, listRunningCronRuns } from "@/client/lib/api";
+import { finishSubmission } from "@/client/lib/drafts-db";
 import { applySessionResponse } from "@/client/lib/session-events";
-import { promptSubmissionId, retainPromptRetry, clearPromptRetry } from "@/client/lib/prompt-retry";
+import { promptSubmissionId, clearPromptRetry } from "@/client/lib/prompt-retry";
 import { useAppStore } from "@/client/stores/app";
 import { installationStorageKey } from "@/client/lib/installation-storage";
 import {
@@ -204,52 +205,75 @@ async function reconcileQueuedReceipt(sessionId: string, optimisticId: string): 
   }
 }
 
-async function submitPrompt(text: string, files: File[]): Promise<void> {
+async function submitPrompt(text: string, files: File[], retryId?: string): Promise<void> {
   // The server starts idle main runs and queues busy ones; never steer from compose.
   const mode = "prompt";
   const sessionId = store.activeSession?.sessionId;
-  const gateSessionId = store.activeSession?.isStreaming
-    ? undefined
-    : store.activeSession?.sessionId;
+  const editor = composer.value;
+  if (!sessionId || !editor) return;
+  const gateSessionId = store.activeSession?.isStreaming ? undefined : sessionId;
   if (gateSessionId && pendingIdlePromptSessionIds.has(gateSessionId)) {
     return;
   }
 
   const requestId = ++promptRequestId;
   promptError.value = undefined;
-  const clientMessageId = promptSubmissionId(sessionId!, mode, text, files);
-  composer.value?.clear();
-  const optimisticId =
-    sessionId && !text.trimStart().startsWith("/")
+  const clientMessageId = retryId ?? promptSubmissionId(sessionId, mode, text, files);
+  if (gateSessionId) pendingIdlePromptSessionIds.add(gateSessionId);
+  try {
+    let journal;
+    try {
+      journal = await editor.journalSubmission(sessionId, {
+        text,
+        files,
+        retryId: clientMessageId,
+      });
+    } catch (error) {
+      showPromptError(new Error(`Message not sent: ${String(error)}`), sessionId, requestId);
+      return;
+    }
+    const { tab, draft } = journal;
+    const optimisticId = !text.trimStart().startsWith("/")
       ? addOptimisticMessage(sessionId, clientMessageId, text, files)
       : undefined;
-  if (gateSessionId) {
-    pendingIdlePromptSessionIds.add(gateSessionId);
-  }
-  try {
-    const receipt = await store.submitPrompt(mode, text, files, clientMessageId);
+    let receipt;
+    try {
+      receipt = await store.submitPrompt(mode, text, files, clientMessageId);
+    } catch (error) {
+      if (!wasPromptAccepted(sessionId, clientMessageId)) {
+        if (optimisticId) removeOptimisticMessage(sessionId, optimisticId);
+        try {
+          await editor.recoverSubmission(tab, sessionId, draft);
+        } catch (recoveryError) {
+          showPromptError(
+            new Error(`Message kept for recovery: ${String(recoveryError)}`),
+            sessionId,
+            requestId,
+          );
+          return;
+        }
+        showPromptError(error, sessionId, requestId);
+        return;
+      }
+    }
+    try {
+      await finishSubmission(tab, sessionId, draft, "accepted");
+      clearPromptRetry(sessionId, clientMessageId);
+    } catch (error) {
+      showPromptError(
+        new Error(`Message sent; could not clear its recovery copy: ${String(error)}`),
+        sessionId,
+        requestId,
+      );
+    }
+    if (!receipt) return;
     // A started receipt can precede the session event carrying the transcript message.
     if (sessionId && optimisticId) {
       setOptimisticDisposition(sessionId, optimisticId, receipt.disposition === "started");
     }
-    clearPromptRetry(sessionId!, clientMessageId);
-    if (receipt.disposition === "queued" && sessionId && optimisticId) {
+    if (receipt.disposition === "queued" && optimisticId) {
       await reconcileQueuedReceipt(sessionId, optimisticId);
     }
-  } catch (error) {
-    if (sessionId && wasPromptAccepted(sessionId, clientMessageId)) {
-      clearPromptRetry(sessionId, clientMessageId);
-      return;
-    }
-    if (sessionId) {
-      if (optimisticId) {
-        removeOptimisticMessage(sessionId, optimisticId);
-      }
-      retainPromptRetry(sessionId, mode, text, files, clientMessageId);
-      composer.value?.restore(sessionId, text, files);
-    }
-    showPromptError(error, sessionId, requestId);
-    throw error;
   } finally {
     if (gateSessionId) {
       pendingIdlePromptSessionIds.delete(gateSessionId);
@@ -312,6 +336,7 @@ async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
         :subagents="subagents"
         :cron-runs="cronRuns"
         :session-key="store.activeSession.sessionId"
+        :drafts-enabled="Boolean(store.draftScope)"
         :offline="isUnavailable"
         :error="promptError ?? subagentError ?? store.lastError"
         :actions-disabled="isUnavailable"

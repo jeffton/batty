@@ -80,6 +80,7 @@ const server = http.createServer(async (request, response) => {
     return json(response, {
       authenticated,
       cacheScope: "offline-test-user",
+      draftScope: "offline-test-owner",
       cacheExpiresAt: now + 86_400_000,
       auth: { passkeyCount: 1 },
       providerAuth: { providers: [] },
@@ -115,6 +116,8 @@ const server = http.createServer(async (request, response) => {
     return response.end(preview);
   }
   if (url.pathname === "/api/version") return json(response, { buildId: "dev" });
+  if (url.pathname === "/api/drafts" && request.method === "GET")
+    return json(response, { drafts: [] });
   if (url.pathname.startsWith("/api/")) {
     unexpectedHttp.push(url.pathname);
     response.statusCode = 404;

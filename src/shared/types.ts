@@ -498,6 +498,7 @@ export type { McpExposure, McpServerConfig };
 export interface BootstrapPayload {
   authenticated: boolean;
   cacheScope?: string;
+  draftScope?: string;
   cacheExpiresAt?: number;
   auth: AuthStatus;
   providerAuth: ProviderAuthStatus;

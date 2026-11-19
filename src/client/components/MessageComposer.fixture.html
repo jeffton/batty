@@ -2,6 +2,12 @@
 <html>
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      #app {
+        min-height: 100dvh;
+        align-content: end;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
@@ -14,7 +20,27 @@
       const submissions = [];
       createApp({
         setup: () => {
+          const composer = ref();
+          let journal;
+          window.addEventListener("fixture:reject-send", () => {
+            if (journal)
+              void composer.value.recoverSubmission(journal.tab, journal.session, journal.draft);
+          });
+          const offline = ref(!navigator.onLine);
           const streaming = ref(params.has("streaming"));
+          for (const event of ["offline", "online"]) {
+            window.addEventListener(event, () => {
+              offline.value = !navigator.onLine;
+            });
+          }
+          window.addEventListener("fixture:restore", () => {
+            void composer.value.restore(
+              "fixture",
+              "Failed prompt",
+              [new File(["failed bytes"], "failed.txt")],
+              "8d0fb963-f020-4c91-8981-b9add2a6552e",
+            );
+          });
           const memoryError = ref();
           const memoryPending = ref(params.has("memory") ? 1 : 0);
           window.addEventListener("fixture:finish-memory", () => {
@@ -36,11 +62,23 @@
           });
           return () =>
             h(MessageComposer, {
+              ref: composer,
+              draftsEnabled: params.has("drafts"),
+              sessionKey: params.has("drafts") ? "fixture" : undefined,
+              offline: offline.value,
+              actionsDisabled: offline.value,
               streaming: streaming.value,
               memoryPending: memoryPending.value,
               memoryError: memoryError.value,
               subagents: subagents.value,
-              onSubmit: (text) => {
+              onSubmit: async (text, files, retryId) => {
+                if (params.has("journal")) {
+                  journal = await composer.value.journalSubmission("fixture", {
+                    text,
+                    files,
+                    retryId: retryId ?? crypto.randomUUID(),
+                  });
+                }
                 submissions.push(text);
                 document.getElementById("submissions").textContent = JSON.stringify(submissions);
               },

@@ -56,11 +56,10 @@ defineExpose({ close: () => popover.value?.hidePopover() });
 </template>
 
 <style>
-.composer-count-control {
-  min-width: 44px;
-  min-height: 44px;
+.chrome-button.composer-count-control {
+  min-width: var(--button-size);
+  min-height: var(--button-size);
   flex: 0 1 auto;
-  max-width: 6rem;
   padding: 0 0.25rem;
   display: inline-flex;
   align-items: center;

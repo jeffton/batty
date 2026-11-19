@@ -702,7 +702,7 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
       <div class="composer__actions-row">
         <div class="composer__left-actions">
           <button
-            class="composer__icon-button"
+            class="composer__icon-button chrome-button"
             type="button"
             aria-label="Add files"
             title="Add files"
@@ -744,7 +744,7 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
             @remove="removeDraft"
           />
           <button
-            class="composer__icon-button composer__send"
+            class="composer__icon-button composer__send chrome-button"
             type="button"
             aria-label="Send prompt"
             title="Send prompt"
@@ -887,8 +887,8 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
 .composer__actions-row {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--composer-stop-width) minmax(0, 1fr);
-  --composer-stop-width: calc(var(--button-size) + 1rem + 0.3rem);
+  /* Both sides get equal space; only active stream controls reserve the center track. */
+  grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
   align-items: center;
   padding: 0 calc(var(--safe-area-right) + 0.4rem) 0 calc(var(--safe-area-left) + 0.4rem);
 }
@@ -910,27 +910,7 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
 
 .composer__icon-button {
   padding: 0;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--color-text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition:
-    background 80ms ease,
-    color 80ms ease;
-}
-
-@media (hover: hover) {
-  .composer__icon-button:hover:not(:disabled) {
-    background: var(--color-bg-elevated);
-    color: var(--color-text);
-  }
-}
-
-.composer__icon-button:disabled {
-  opacity: 0.4;
+  --chrome-button-ink: var(--color-text-muted);
 }
 
 .composer__icon-button :deep(svg) {
@@ -945,6 +925,6 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
 }
 
 .composer__send {
-  color: var(--color-accent-strong);
+  --chrome-button-ink: var(--color-accent-strong);
 }
 </style>

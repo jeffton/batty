@@ -57,6 +57,9 @@
           window.addEventListener("fixture:finish-agent", () => {
             subagents.value = [];
           });
+          window.addEventListener("fixture:start-main", () => {
+            streaming.value = true;
+          });
           window.addEventListener("fixture:finish-main", () => {
             streaming.value = false;
           });

@@ -80,16 +80,26 @@ test("Chromium composer owns its labeled textarea without changing newline, comp
 test("keeps stream controls centered independently of the left and right compose actions", async () => {
   for (const [name, width, hasTouch] of [
     ["desktop", 1100, false],
-    ["mobile", 300, true],
+    ["iphone-portrait", 393, true],
+    ["iphone-compact", 375, true],
+    ["narrow", 300, true],
   ] as const) {
     const context = (await browser.newContext({
-      viewport: { width, height: 570 },
+      viewport: { width, height: name === "iphone-portrait" ? 852 : 570 },
+      isMobile: hasTouch,
       hasTouch,
     })) as unknown as import("playwright-core").BrowserContext;
     try {
       const page = await context.newPage();
       page.setDefaultTimeout(5_000);
       await page.goto(`${url}?drafts&tasks&streaming`);
+      // In the production build, the global chrome styles can load after the SFC's styles.
+      await page.addStyleTag({
+        content: `.chrome-button { padding: 0 0.75rem; gap: 0.4rem; } ${
+          name === "iphone-portrait" ? ":root { font-size: 20px; }" : ""
+        }`,
+      });
+      await page.evaluate(() => document.fonts.ready);
       const attach = page.getByRole("button", { name: "Add files" });
       const tasks = page.getByRole("button", { name: "Running tasks" });
       const drafts = page.getByRole("button", { name: /^Drafts:/ });
@@ -114,7 +124,26 @@ test("keeps stream controls centered independently of the left and right compose
         ]);
         return { a: a!, t, d: d!, s: s!, g };
       };
+      async function checkCounts(taskCount: string | undefined, draftCount: string) {
+        for (const [button, label] of [
+          [tasks, taskCount],
+          [drafts, draftCount],
+        ] as const) {
+          if (!label) continue;
+          expect(await button.getAttribute("title")).toBe(label);
+          expect(
+            await button.locator("strong").evaluate((element) => ({
+              text: (element as HTMLElement).innerText,
+              fits: element.scrollWidth <= element.clientWidth,
+            })),
+          ).toEqual({ text: name === "narrow" ? label.split(" ")[0] : label, fits: true });
+          const hit = (await button.boundingBox())!;
+          expect(hit.width).toBeGreaterThanOrEqual(44);
+          expect(hit.height).toBeGreaterThanOrEqual(44);
+        }
+      }
       const active = await geometry();
+      await checkCounts("1 task", "0 drafts");
       expect(active.a.x + active.a.width).toBeCloseTo(active.t!.x, 0);
       expect(active.d.x + active.d.width).toBeCloseTo(active.s.x, 0);
       expect(active.g!.x).toBeGreaterThanOrEqual(active.t!.x + active.t!.width - 1);
@@ -134,7 +163,43 @@ test("keeps stream controls centered independently of the left and right compose
         if (process.env.BATTY_UI_SCREENSHOTS === "1")
           await page.screenshot({ path: `.tmp/ui-feedback/batty-composer-${name}-${state}.png` });
       };
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      const background = (locator: typeof attach) =>
+        locator.evaluate((element) => getComputedStyle(element).backgroundColor);
+      if (hasTouch) {
+        // Even if a browser synthesizes :hover after a tap, the hover rule is gated by input capability.
+        expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(false);
+        const idleBackground = await background(stop);
+        await stop.tap();
+        await expect.poll(() => background(stop)).toBe(idleBackground);
+      } else {
+        const plain = await background(drafts);
+        await drafts.hover();
+        await expect.poll(() => background(drafts)).not.toBe(plain);
+        const green = await background(drafts);
+        for (const button of [attach, tasks, send]) {
+          await button.hover();
+          await expect.poll(() => background(button)).toBe(green);
+        }
+        await stop.hover();
+        await expect.poll(() => background(stop)).not.toBe(plain);
+        expect(await background(stop)).not.toBe(green);
+        await input.fill("");
+        await page.locator(".composer__chip").click();
+        expect(await send.isDisabled()).toBe(true);
+        await page.mouse.move(active.s.x + active.s.width / 2, active.s.y + active.s.height / 2);
+        expect(await background(send)).toBe(plain);
+        await input.fill("Testing the composer toolbar");
+      }
       await capture("streaming");
+
+      await page.evaluate(() => window.dispatchEvent(new Event("fixture:finish-main")));
+      await stop.waitFor({ state: "hidden" });
+      await checkCounts("1 task", "0 drafts");
+      await capture("idle-with-tasks");
+      await page.evaluate(() => window.dispatchEvent(new Event("fixture:start-main")));
+      await stop.waitFor();
+      expect(await geometry()).toEqual(active);
 
       for (const [trigger, label] of [
         [tasks, "Running tasks"],
@@ -165,6 +230,7 @@ test("keeps stream controls centered independently of the left and right compose
       await page.evaluate(() => window.dispatchEvent(new Event("fixture:finish-main")));
       await stop.waitFor({ state: "hidden" });
       expect(await geometry()).toEqual({ ...active, t: null, g: null });
+      await checkCounts(undefined, "0 drafts");
       await capture("idle");
     } finally {
       await context.close();

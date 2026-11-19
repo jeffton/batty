@@ -60,7 +60,7 @@ defineExpose({ close: () => popover.value?.hidePopover() });
   min-width: var(--button-size);
   min-height: var(--button-size);
   flex: 0 1 auto;
-  padding: 0 0.25rem;
+  padding: 0 calc((var(--button-size) - var(--button-icon-size)) / 2);
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;

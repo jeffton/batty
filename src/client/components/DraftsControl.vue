@@ -30,7 +30,7 @@ defineExpose({ close: () => popover.value?.close() });
     dialog-label="Drafts"
     @toggle="($event as ToggleEvent).newState === 'open' && emit('open')"
   >
-    <template #icon><Files :size="17" aria-hidden="true" /></template>
+    <template #icon><Files aria-hidden="true" /></template>
     <header class="composer-list-popover__header drafts-control__header">
       <span>Drafts</span>
       <button

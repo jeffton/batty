@@ -99,7 +99,7 @@ function sessionToggle(taskId: string, event: Event): void {
     :show-trigger="Boolean(tasks.length || tasksOpen)"
     @toggle="tasksOpen = ($event as ToggleEvent).newState === 'open'"
   >
-    <template #icon><Activity :size="17" aria-hidden="true" /></template>
+    <template #icon><Activity aria-hidden="true" /></template>
     <template #status>
       <span v-if="hasRunningTasks" class="spinner tasks-control__spinner" aria-hidden="true" />
       <CircleAlert

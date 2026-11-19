@@ -5,7 +5,12 @@
     <style>
       #app {
         min-height: 100dvh;
-        align-content: end;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      #app > .composer {
+        margin-top: auto;
       }
     </style>
   </head>
@@ -13,7 +18,10 @@
     <div id="app"></div>
     <output id="submissions" hidden>[]</output>
     <script type="module">
-      import { createApp, h, ref } from "vue";
+      import { createApp, h, ref, watchEffect } from "vue";
+      import { createPinia } from "pinia";
+      import { useAppStore } from "../stores/app";
+      import ChatHeader from "./ChatHeader.vue";
       import MessageComposer from "./MessageComposer.vue";
       import "../styles.css";
       const params = new URLSearchParams(location.search);
@@ -63,7 +71,44 @@
           window.addEventListener("fixture:finish-main", () => {
             streaming.value = false;
           });
-          return () =>
+          if (params.has("header")) {
+            const store = useAppStore();
+            store.settings.cloudBrowserAvailable = true;
+            Object.assign(store.settings, {
+              pushTitle: "Batty fixture",
+              memoryModel: "fixture/model",
+              memoryReasoning: "medium",
+              memoryLanguage: "English",
+            });
+            store.activeSession = {
+              model: "fixture/model",
+              contextTokens: 12_000,
+              contextWindow: 32_000,
+              contextPercent: 37.5,
+            };
+            store.providerUsage = {
+              provider: "fixture",
+              usage: {
+                windows: [
+                  {
+                    id: "hour",
+                    usedPercent: 23,
+                    windowSeconds: 3600,
+                    resetsAt: Date.now() + 300_000,
+                  },
+                ],
+              },
+            };
+            watchEffect(() => {
+              store.connectionState = offline.value ? "offline" : "online";
+            });
+            window.addEventListener("fixture:hide-header-controls", () => {
+              store.settings.cloudBrowserAvailable = false;
+              store.providerUsage = undefined;
+            });
+          }
+          return () => [
+            params.has("header") ? h(ChatHeader) : null,
             h(MessageComposer, {
               ref: composer,
               draftsEnabled: params.has("drafts"),
@@ -85,9 +130,12 @@
                 submissions.push(text);
                 document.getElementById("submissions").textContent = JSON.stringify(submissions);
               },
-            });
+            }),
+          ];
         },
-      }).mount("#app");
+      })
+        .use(createPinia())
+        .mount("#app");
     </script>
   </body>
 </html>

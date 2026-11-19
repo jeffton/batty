@@ -40,47 +40,47 @@ async function logout() {
 </script>
 <template>
   <header class="header">
-    <div class="header__brand">
+    <div class="header__controls">
       <button
         type="button"
-        class="header__button chrome-button chrome-button--icon"
+        class="header__brand header__button chrome-button chrome-button--icon"
         popovertarget="settings-popover"
         aria-label="Settings"
         title="Settings"
       >
         <img :src="withBaseUrl('/favicon.png')" alt="" />
       </button>
+      <button
+        v-if="store.settings.cloudBrowserAvailable"
+        type="button"
+        class="header__button chrome-button chrome-button--icon"
+        aria-label="Open browser"
+        title="Open browser"
+        :disabled="openingBrowser || !store.workspaces.length"
+        :aria-busy="openingBrowser"
+        @click="showBrowser"
+      >
+        <Globe :size="17" />
+      </button>
+      <button
+        type="button"
+        class="header__button chrome-button chrome-button--icon"
+        popovertarget="workers-popover"
+        aria-label="Cron"
+        title="Cron"
+      >
+        <Clock3 :size="17" />
+      </button>
+      <button
+        type="button"
+        class="header__button chrome-button chrome-button--icon"
+        popovertarget="tools-popover"
+        aria-label="Workspaces and tools"
+        title="Workspaces and tools"
+      >
+        <Wrench :size="17" />
+      </button>
     </div>
-    <button
-      v-if="store.settings.cloudBrowserAvailable"
-      type="button"
-      class="header__button chrome-button chrome-button--icon"
-      aria-label="Open browser"
-      title="Open browser"
-      :disabled="openingBrowser || !store.workspaces.length"
-      :aria-busy="openingBrowser"
-      @click="showBrowser"
-    >
-      <Globe :size="17" />
-    </button>
-    <button
-      type="button"
-      class="header__button chrome-button chrome-button--icon"
-      popovertarget="workers-popover"
-      aria-label="Cron"
-      title="Cron"
-    >
-      <Clock3 :size="17" />
-    </button>
-    <button
-      type="button"
-      class="header__button chrome-button chrome-button--icon"
-      popovertarget="tools-popover"
-      aria-label="Workspaces and tools"
-      title="Workspaces and tools"
-    >
-      <Wrench :size="17" />
-    </button>
     <BrowserPopover
       v-if="cloudBrowser"
       :key="cloudBrowser.browserId"
@@ -88,14 +88,15 @@ async function logout() {
       :browser-id="cloudBrowser.browserId"
       title="Cloud browser"
     />
-    <div class="header__spacer" />
-    <ProviderUsageIndicator :model="store.activeSession?.model" :update="store.providerUsage" />
-    <SessionHeaderStatus
-      :context-tokens="store.activeSession?.contextTokens"
-      :context-window="store.activeSession?.contextWindow"
-      :context-percent="store.activeSession?.contextPercent"
-      :connection-state="store.connectionState"
-    />
+    <div class="header__controls">
+      <ProviderUsageIndicator :model="store.activeSession?.model" :update="store.providerUsage" />
+      <SessionHeaderStatus
+        :context-tokens="store.activeSession?.contextTokens"
+        :context-window="store.activeSession?.contextWindow"
+        :context-percent="store.activeSession?.contextPercent"
+        :connection-state="store.connectionState"
+      />
+    </div>
     <SettingsPopover
       popover-id="settings-popover"
       anchor-name="--settings-anchor"
@@ -112,7 +113,7 @@ async function logout() {
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  justify-content: space-between;
   min-width: 0;
   padding: calc(var(--safe-area-top) + 0.5rem) calc(var(--safe-area-right) + 0.65rem) 0.5rem
     calc(var(--safe-area-left) + 0.65rem);
@@ -120,11 +121,10 @@ async function logout() {
   box-shadow: var(--color-shadow-header);
   border-bottom: 1px solid var(--color-chrome-border);
 }
-.header__brand {
+.header__controls {
   display: flex;
   align-items: center;
-  margin-right: 0.15rem;
-  border-radius: var(--chrome-control-radius);
+  column-gap: var(--chrome-action-gap);
 }
 .header__brand img {
   width: 1.6rem;
@@ -144,12 +144,8 @@ async function logout() {
 .header__button {
   flex: 0 0 var(--button-size);
 }
-.header__spacer {
-  flex: 1;
-}
 @media (max-width: 360px) {
   .header {
-    gap: 2px;
     padding-right: calc(var(--safe-area-right) + 4px);
     padding-left: calc(var(--safe-area-left) + 4px);
   }

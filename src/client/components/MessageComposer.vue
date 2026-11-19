@@ -724,6 +724,7 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
         <div class="composer__stop-slot">
           <StreamingStopControl
             v-if="props.streaming"
+            class="composer__stream-controls"
             :disabled="actionsDisabled"
             @stop="emit('stop')"
           />
@@ -897,6 +898,7 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
 .composer__right-actions {
   display: flex;
   align-items: center;
+  column-gap: var(--chrome-action-gap);
   min-width: 0;
 }
 
@@ -922,6 +924,10 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
   align-items: center;
   justify-content: center;
   min-height: 44px;
+}
+
+.composer__stop-slot .composer__stream-controls {
+  column-gap: var(--chrome-action-gap);
 }
 
 .composer__send {

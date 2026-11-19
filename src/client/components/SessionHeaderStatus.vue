@@ -101,7 +101,7 @@ const contextArcClass = computed(() => {
 .session-header-status {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  column-gap: var(--chrome-action-gap);
   flex-shrink: 0;
 }
 
@@ -169,9 +169,6 @@ const contextArcClass = computed(() => {
 }
 
 @media (max-width: 360px) {
-  .session-header-status {
-    gap: 2px;
-  }
   .session-header-status__context,
   .session-header-status__connection {
     width: 20px;

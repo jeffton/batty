@@ -57,6 +57,7 @@
   --button-size: 44px;
   --button-icon-size: 22px;
   --chrome-control-radius: 0.85rem;
+  --chrome-action-gap: 8px;
 
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
@@ -155,6 +156,19 @@
   line-height: 1.5;
   font-weight: 400;
   color-scheme: light;
+}
+
+/* Keep labels and touch targets intact when the toolbar gets tight. */
+@media (max-width: 416px) {
+  :root {
+    --chrome-action-gap: 6px;
+  }
+}
+
+@media (max-width: 360px) {
+  :root {
+    --chrome-action-gap: 4px;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

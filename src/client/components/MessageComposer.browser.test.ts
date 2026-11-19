@@ -80,8 +80,10 @@ test("Chromium composer owns its labeled textarea without changing newline, comp
 test("keeps stream controls centered independently of the left and right compose actions", async () => {
   for (const [name, width, hasTouch] of [
     ["desktop", 1100, false],
+    ["wide-mobile-safe-area", 450, true],
     ["iphone-portrait", 393, true],
     ["iphone-compact", 375, true],
+    ["just-above-short-label", 355, true],
     ["narrow", 300, true],
   ] as const) {
     const context = (await browser.newContext({
@@ -92,14 +94,18 @@ test("keeps stream controls centered independently of the left and right compose
     try {
       const page = await context.newPage();
       page.setDefaultTimeout(5_000);
-      await page.goto(`${url}?drafts&tasks&streaming`);
+      await page.goto(`${url}?header&drafts&tasks&streaming`);
       // In the production build, the global chrome styles can load after the SFC's styles.
+      const sideInset = name === "wide-mobile-safe-area" ? 12 : 0;
       await page.addStyleTag({
-        content: `.chrome-button { padding: 0 0.75rem; gap: 0.4rem; } ${
-          name === "iphone-portrait" ? ":root { font-size: 20px; }" : ""
-        }`,
+        content: `.chrome-button { padding: 0 0.75rem; gap: 0.4rem; }
+          :root { --safe-area-left: ${sideInset}px; --safe-area-right: ${sideInset}px; }
+          ${name === "iphone-portrait" ? ":root { font-size: 20px; }" : ""}`,
       });
       await page.evaluate(() => document.fonts.ready);
+      const rem = await page.evaluate(() =>
+        parseFloat(getComputedStyle(document.documentElement).fontSize),
+      );
       const attach = page.getByRole("button", { name: "Add files" });
       const tasks = page.getByRole("button", { name: "Running tasks" });
       const drafts = page.getByRole("button", { name: /^Drafts:/ });
@@ -108,6 +114,13 @@ test("keeps stream controls centered independently of the left and right compose
       const group = page.locator(".streaming-stop-control");
       const input = page.getByRole("textbox", { name: "Chat message" });
       await input.fill("Testing the composer toolbar");
+      const adjacentInset = (button: typeof attach) =>
+        button.evaluate(
+          (element) =>
+            (element.getBoundingClientRect().width -
+              element.querySelector("svg")!.getBoundingClientRect().width) /
+            2,
+        );
       await page.locator('input[type="file"]').setInputFiles({
         name: `${"A very long attachment filename ".repeat(5)}.txt`,
         mimeType: "text/plain",
@@ -136,21 +149,72 @@ test("keeps stream controls centered independently of the left and right compose
               text: (element as HTMLElement).innerText,
               fits: element.scrollWidth <= element.clientWidth,
             })),
+            `${name}: ${label}`,
           ).toEqual({ text: name === "narrow" ? label.split(" ")[0] : label, fits: true });
           const hit = (await button.boundingBox())!;
           expect(hit.width).toBeGreaterThanOrEqual(44);
           expect(hit.height).toBeGreaterThanOrEqual(44);
+          const inset = await adjacentInset(button === tasks ? attach : send);
+          expect(
+            await button.evaluate((element) => {
+              const icon = element.querySelector("svg")!.getBoundingClientRect();
+              const label = element.querySelector("strong")!.getBoundingClientRect();
+              const bounds = element.getBoundingClientRect();
+              return {
+                iconInset: icon.left - bounds.left,
+                textInset: bounds.right - label.right,
+                iconTextGap: label.left - icon.right,
+              };
+            }),
+          ).toEqual({
+            iconInset: inset,
+            textInset: inset,
+            iconTextGap: rem / 4,
+          });
         }
       }
       const active = await geometry();
       await checkCounts("1 task", "0 drafts");
-      expect(active.a.x + active.a.width).toBeCloseTo(active.t!.x, 0);
-      expect(active.d.x + active.d.width).toBeCloseTo(active.s.x, 0);
+      const gap = width <= 360 ? 4 : width <= 416 ? 6 : 8;
+      const spacing = async (first: typeof attach, next: typeof attach) => {
+        const [left, right] = await Promise.all([first.boundingBox(), next.boundingBox()]);
+        return right!.x - left!.x - left!.width;
+      };
+      expect(active.t!.x - active.a.x - active.a.width).toBeCloseTo(gap, 0);
+      expect(active.s.x - active.d.x - active.d.width).toBeCloseTo(gap, 0);
+      // The spinner rotates, so its painted bounds do not represent the flex gap.
+      expect(await group.evaluate((element) => getComputedStyle(element).columnGap)).toBe(
+        `${gap}px`,
+      );
+
+      const header = page.locator("header.header");
+      const settings = header.getByRole("button", { name: "Settings" });
+      const browserButton = header.getByRole("button", { name: "Open browser" });
+      const cron = header.getByRole("button", { name: "Cron" });
+      const tools = header.getByRole("button", { name: "Workspaces and tools" });
+      const usage = header.getByRole("button", { name: "Usage limits" });
+      const contextUsage = header.locator(".session-header-status__context");
+      const connection = header.locator(".session-header-status__connection");
+      for (const [first, next] of [
+        [settings, browserButton],
+        [browserButton, cron],
+        [cron, tools],
+        [usage, contextUsage],
+        [contextUsage, connection],
+      ] as const) {
+        expect(await spacing(first, next)).toBeCloseTo(gap, 0);
+      }
+      const settingsX = (await settings.boundingBox())!.x;
+      const connectionBox = (await connection.boundingBox())!;
+      expect(settingsX).toBeGreaterThanOrEqual(sideInset + 4);
+      expect(connectionBox.x + connectionBox.width).toBeLessThanOrEqual(width - sideInset - 4);
+      expect(await spacing(tools, usage)).toBeGreaterThanOrEqual(0);
       expect(active.g!.x).toBeGreaterThanOrEqual(active.t!.x + active.t!.width - 1);
       expect(active.g!.x + active.g!.width).toBeLessThanOrEqual(active.d.x + 1);
       expect(active.g!.x + active.g!.width / 2).toBeCloseTo(width / 2, 0);
-      expect(active.s.x + active.s.width).toBeGreaterThanOrEqual(width - 8);
-      expect(active.s.x + active.s.width).toBeLessThanOrEqual(width);
+      expect(active.a.x).toBeGreaterThanOrEqual(sideInset);
+      expect(active.s.x + active.s.width).toBeGreaterThanOrEqual(width - sideInset - 8);
+      expect(active.s.x + active.s.width).toBeLessThanOrEqual(width - sideInset);
       expect(
         await page.locator(".composer__chip").evaluate((chip) => ({
           inViewport: chip.getBoundingClientRect().right <= window.innerWidth,
@@ -232,11 +296,23 @@ test("keeps stream controls centered independently of the left and right compose
       expect(await geometry()).toEqual({ ...active, t: null, g: null });
       await checkCounts(undefined, "0 drafts");
       await capture("idle");
+      await context.setOffline(true);
+      await expect.poll(() => connection.getAttribute("aria-label")).toBe("Offline");
+      expect(await send.isDisabled()).toBe(true);
+      expect(await geometry()).toEqual({ ...active, t: null, g: null });
+      await capture("offline");
+      await page.evaluate(() => window.dispatchEvent(new Event("fixture:hide-header-controls")));
+      await browserButton.waitFor({ state: "hidden" });
+      await usage.waitFor({ state: "hidden" });
+      expect(await spacing(settings, cron)).toBeCloseTo(gap, 0);
+      expect(await spacing(contextUsage, connection)).toBeCloseTo(gap, 0);
+      expect((await settings.boundingBox())!.x).toBe(settingsX);
+      expect(await connection.boundingBox()).toEqual(connectionBox);
     } finally {
       await context.close();
     }
   }
-}, 30_000);
+}, 60_000);
 
 test("drafts preserve conflicts, attachments and failed messages across reload and reconnect", async () => {
   const phone = (await browser.newContext({

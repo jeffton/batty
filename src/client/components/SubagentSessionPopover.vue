@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { CircleAlert, LoaderCircle } from "@lucide/vue";
+import { CircleAlert } from "@lucide/vue";
+import LoadingIndicator from "@/client/components/LoadingIndicator.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
@@ -239,24 +240,24 @@ onBeforeUnmount(() => {
     </template>
 
     <div class="subagent-session-popover__body">
-      <div v-if="loading && !session" class="subagent-session-popover__empty">
-        <LoaderCircle :size="18" class="subagent-session-popover__spinner" />
-        <span>Loading session…</span>
-      </div>
+      <LoadingIndicator
+        class="subagent-session-popover__empty"
+        :label="loading && !session ? 'Loading session' : undefined"
+      />
 
-      <div v-else-if="missing" class="subagent-session-popover__empty" role="status">
+      <div v-if="!loading && missing" class="subagent-session-popover__empty" role="status">
         <span>This session is no longer available.</span>
       </div>
 
       <div
-        v-else-if="errorMessage && !session"
+        v-else-if="!loading && errorMessage && !session"
         class="subagent-session-popover__empty subagent-session-popover__empty--error"
       >
         <CircleAlert :size="18" />
         <span>{{ errorMessage }}</span>
       </div>
 
-      <div v-else-if="!session" class="subagent-session-popover__empty" role="status">
+      <div v-else-if="!loading && !session" class="subagent-session-popover__empty" role="status">
         <span>Offline — reconnecting…</span>
       </div>
 
@@ -309,15 +310,5 @@ onBeforeUnmount(() => {
 .subagent-session-popover__transcript :deep(.transcript) {
   padding-left: 1rem;
   padding-right: 1rem;
-}
-
-.subagent-session-popover__spinner {
-  animation: subagent-session-popover-spin 0.9s linear infinite;
-}
-
-@keyframes subagent-session-popover-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

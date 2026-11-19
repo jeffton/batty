@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingIndicator from "@/client/components/LoadingIndicator.vue";
 import { onMounted, onUnmounted, ref, watch } from "vue";
 import WorkingHoursGate from "@/client/components/WorkingHoursGate.vue";
 import { useRouter } from "vue-router";
@@ -51,10 +52,7 @@ watch(
         <p role="alert">{{ store.lastError }}</p>
         <button type="button" @click="store.bootstrap()">Retry</button>
       </template>
-      <template v-else
-        ><div class="spinner" />
-        <p>Booting Batty…</p></template
-      >
+      <LoadingIndicator :label="store.bootstrapFailed ? undefined : 'Booting Batty'" large />
     </div>
     <WorkingHoursGate v-else :schedule="store.settings.workingHours">
       <RouterView />

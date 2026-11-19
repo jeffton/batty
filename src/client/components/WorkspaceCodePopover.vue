@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingIndicator from "@/client/components/LoadingIndicator.vue";
 import type { FileTree } from "@pierre/trees";
 import type { CodeView } from "@pierre/diffs";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
@@ -269,9 +270,10 @@ onBeforeUnmount(() => {
           :id-prefix="props.popoverId"
           @select="selectSearchFile"
         >
-          <div v-if="loadingDirectories" class="workspace-code__status" role="status">
-            Loading files…
-          </div>
+          <LoadingIndicator
+            class="workspace-code__status"
+            :label="loadingDirectories ? 'Loading files' : undefined"
+          />
           <div
             v-for="(message, path) in directoryErrors"
             :key="path"
@@ -294,10 +296,15 @@ onBeforeUnmount(() => {
         </WorkspaceFileSearch>
       </aside>
       <section class="workspace-code__content" aria-label="File preview">
-        <div v-if="loadingFile" class="workspace-code__status" role="status">Loading file…</div>
-        <div v-else-if="fileError" class="workspace-code__error" role="alert">{{ fileError }}</div>
-        <div v-else-if="fileMessage" class="workspace-code__status">{{ fileMessage }}</div>
-        <div v-else-if="!selectedPath" class="workspace-code__status">Select a file.</div>
+        <LoadingIndicator
+          class="workspace-code__status"
+          :label="loadingFile ? 'Loading file' : undefined"
+        />
+        <template v-if="!loadingFile">
+          <div v-if="fileError" class="workspace-code__error" role="alert">{{ fileError }}</div>
+          <div v-else-if="fileMessage" class="workspace-code__status">{{ fileMessage }}</div>
+          <div v-else-if="!selectedPath" class="workspace-code__status">Select a file.</div>
+        </template>
         <div ref="codeRoot" class="workspace-code__viewer" />
       </section>
     </div>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingIndicator from "@/client/components/LoadingIndicator.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import WorkspaceCodePopover from "./WorkspaceCodePopover.vue";
@@ -150,10 +151,16 @@ onBeforeUnmount(() => {
       :aria-labelledby="tabId(tab)"
       class="tools-popover__pane"
     >
-      <div v-if="loading" class="tools-popover__empty">Loading…</div>
-      <div v-else-if="error" class="tools-popover__empty tools-popover__error">{{ error }}</div>
-      <div v-else-if="!sessionId" class="tools-popover__empty">Chat is loading.</div>
-      <template v-else-if="tab === 'Skills'">
+      <LoadingIndicator
+        class="tools-popover__empty tools-popover__loading"
+        :label="
+          loading ? 'Loading tools' : !error && !sessionId ? 'Loading chat for tools' : undefined
+        "
+      />
+      <div v-if="!loading && error" class="tools-popover__empty tools-popover__error">
+        {{ error }}
+      </div>
+      <template v-else-if="!loading && sessionId && tab === 'Skills'">
         <article
           v-for="skill in resources.skills"
           :key="skill.filePath"
@@ -165,7 +172,7 @@ onBeforeUnmount(() => {
         </article>
         <div v-if="!resources.skills.length" class="tools-popover__empty">No skills available.</div>
       </template>
-      <template v-else>
+      <template v-else-if="!loading && sessionId">
         <article v-for="tool in resources.tools" :key="tool.name" class="tools-popover__item">
           <strong>{{ tool.name }}</strong>
           <p>{{ tool.description }}</p>
@@ -248,6 +255,11 @@ onBeforeUnmount(() => {
   color: var(--color-text-subtle);
   text-align: center;
   font-size: 0.85rem;
+}
+
+.tools-popover__loading {
+  display: flex;
+  justify-content: center;
 }
 
 .tools-popover__error {

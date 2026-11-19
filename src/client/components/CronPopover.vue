@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingIndicator from "@/client/components/LoadingIndicator.vue";
 import { PanelRightOpen } from "@lucide/vue";
 import { onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "./FullPopover.vue";
@@ -108,7 +109,10 @@ onBeforeUnmount(() => {
     </template>
     <div class="cron-popover__body">
       <p v-if="error" role="alert" class="cron-popover__error">{{ error }}</p>
-      <p v-if="loading && !jobs.length && !logs.length" class="cron-popover__empty">Loading…</p>
+      <LoadingIndicator
+        class="cron-popover__empty"
+        :label="loading && !jobs.length && !logs.length ? 'Loading schedules' : undefined"
+      />
       <div
         v-for="tab in tabs"
         v-show="activeTab === tab"

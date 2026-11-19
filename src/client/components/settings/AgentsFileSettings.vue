@@ -2,6 +2,7 @@
 import { FilePenLine, Save } from "@lucide/vue";
 import { computed, reactive, ref } from "vue";
 import FullPopover from "../FullPopover.vue";
+import LoadingIndicator from "@/client/components/LoadingIndicator.vue";
 import { useAppStore } from "@/client/stores/app";
 import { getAssistantAgentsFile, setAssistantAgentsFile } from "@/client/lib/api";
 
@@ -13,6 +14,7 @@ const title = ref("");
 const pendingLoads = reactive(new Set<string>());
 const loading = computed(() => !!target.value && pendingLoads.has(target.value));
 const saving = ref(false);
+const editorOpen = ref(false);
 const errors = reactive<Record<string, string>>({});
 const error = computed(() => (target.value ? errors[target.value] : ""));
 
@@ -78,6 +80,7 @@ async function save(): Promise<void> {
     class="settings-popover settings-popover--panel-surface"
     popover-id="settings-agents-editor"
     :title="title"
+    @toggle="editorOpen = ($event as ToggleEvent).newState === 'open'"
   >
     <template #header-actions>
       <button
@@ -90,7 +93,7 @@ async function save(): Promise<void> {
       </button>
     </template>
     <div class="settings-popover__file-editor">
-      <div v-if="loading" role="status">Loading…</div>
+      <LoadingIndicator :label="editorOpen && loading ? 'Loading AGENTS.md' : undefined" />
       <textarea
         v-if="target && target in drafts"
         v-model="drafts[target]"

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Pencil, Plus, RotateCw, LogIn, LogOut, X, LoaderCircle } from "@lucide/vue";
+import { Pencil, Plus, RotateCw, LogIn, LogOut, X } from "@lucide/vue";
+import LoadingIndicator from "@/client/components/LoadingIndicator.vue";
 import { useAppStore } from "@/client/stores/app";
 import DeleteButton from "@/client/components/DeleteButton.vue";
 import McpServerEditor from "@/client/components/McpServerEditor.vue";
@@ -66,10 +67,14 @@ function isEditing(server: Server): boolean {
   return editorOpen.value && selectedName.value === server.name;
 }
 
+function statusLoading(server: Server): boolean {
+  return loading.value && server.config.enabled !== false && !serverStatus(server);
+}
+
 function connectionLabel(server: Server): string {
   if (server.config.enabled === false) return "Disabled";
   const state = serverStatus(server)?.state;
-  if (!state) return loading.value ? "Loading status…" : "Status unavailable";
+  if (!state) return "Status unavailable";
   if (state === "needs-auth") return "Sign-in required";
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
@@ -399,11 +404,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="mcp-settings" :aria-busy="loading">
-    <div v-if="loading" class="mcp-settings__loading" role="status">
-      <LoaderCircle :size="16" class="mcp-settings__spinner" aria-hidden="true" />
-      Loading MCPs…
-    </div>
+  <section class="mcp-settings">
+    <LoadingIndicator :label="loading ? 'Loading MCPs' : undefined" />
     <div v-if="settingsError || statusError" role="alert" class="mcp-settings__error">
       <div v-if="settingsError">{{ settingsError }}</div>
       <div v-if="statusError">{{ statusError }}</div>
@@ -464,7 +466,10 @@ onBeforeUnmount(() => {
       </div>
       <div class="mcp-settings__status-row">
         <div class="mcp-settings__details">
-          <span>{{ connectionLabel(server) }}</span>
+          <LoadingIndicator
+            :label="statusLoading(server) ? `Loading status for ${server.name}` : undefined"
+          />
+          <span v-if="!statusLoading(server)">{{ connectionLabel(server) }}</span>
         </div>
         <div
           v-if="!isEditing(server) && connectionActions(server).length"
@@ -581,21 +586,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-}
-.mcp-settings__loading {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--color-text-subtle);
-  font-size: 0.78rem;
-}
-.mcp-settings__spinner {
-  animation: mcp-spin 1s linear infinite;
-}
-@keyframes mcp-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 .mcp-settings__server-head,
 .mcp-settings__actions {

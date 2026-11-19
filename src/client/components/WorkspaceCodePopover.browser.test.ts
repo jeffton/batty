@@ -119,8 +119,15 @@ test("workspace row opens native code browser, lazily browses files and closes b
     page.setDefaultTimeout(5000);
     const calls: string[] = [];
     const errors: string[] = [];
+    const directory = Promise.withResolvers<void>();
+    const file = Promise.withResolvers<void>();
     await fixtureOperation(server, page, "workspace.files", async (input, _context, next) => {
       calls.push(input.path ?? "");
+      if (!input.path) await directory.promise;
+      return next();
+    });
+    await fixtureOperation(server, page, "workspace.file", async (input, _context, next) => {
+      if (input.path === "src/main.ts") await file.promise;
       return next();
     });
     page.on("pageerror", (error) => errors.push(error.message));
@@ -136,7 +143,12 @@ test("workspace row opens native code browser, lazily browses files and closes b
         .locator(".workspace-code__branch")
         .getByText("feature/current-branch", { exact: true })
         .waitFor();
+      const loadingFiles = popover.getByRole("status", { name: "Loading files", exact: true });
+      await loadingFiles.locator(".spinner").waitFor();
+      expect(await loadingFiles.textContent()).toBe("Loading files");
+      directory.resolve();
       await popover.getByRole("treeitem", { name: "src", exact: true }).waitFor();
+      await loadingFiles.waitFor({ state: "detached" });
       expect(calls).toHaveLength(1);
       const bounds = await popover.boundingBox();
       expect(bounds!.width).toBeGreaterThan(width - 50);
@@ -145,6 +157,11 @@ test("workspace row opens native code browser, lazily browses files and closes b
       await popover.getByRole("treeitem", { name: "main.ts", exact: true }).waitFor();
       expect(calls).toHaveLength(2);
       await popover.getByRole("treeitem", { name: "main.ts", exact: true }).click();
+      const loadingFile = popover.getByRole("status", { name: "Loading file", exact: true });
+      await loadingFile.locator(".spinner").waitFor();
+      expect(await loadingFile.textContent()).toBe("Loading file");
+      file.resolve();
+      await loadingFile.waitFor({ state: "detached" });
       await popover
         .locator("[data-line]")
         .filter({ hasText: 'export const greeting = "Hej 🦾";' })
@@ -380,7 +397,11 @@ test("incremental matches preserve collapsed folders, open new parents, and flus
     await filtered.getByRole("treeitem", { name: "needle-stream.ts", exact: true }).waitFor();
     const searching = popover.getByRole("status", { name: "Searching", exact: true });
     expect(await searching.locator(".spinner").isVisible()).toBe(true);
-    expect(await searching.textContent()).toBe("");
+    expect(
+      await searching
+        .locator(".loading-indicator__text")
+        .evaluate((el) => getComputedStyle(el).clipPath),
+    ).toBe("inset(50%)");
     await one.click();
     expect(await one.getAttribute("aria-expanded")).toBe("false");
     incrementalSearch!.enqueue({ kind: "match", path: "one/needle-stream-two.ts" });

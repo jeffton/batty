@@ -77,7 +77,7 @@ for (const [name, viewport] of [
         }).observe(document, { childList: true, subtree: true });
       });
       await page.goto(url);
-      await page.getByText("Booting Batty…").waitFor();
+      await page.getByRole("status", { name: "Booting Batty" }).locator(".spinner").waitFor();
       expect(await page.locator(".login-view").count()).toBe(0);
       finish();
       await page.getByRole("heading", { name: "Off the clock." }).waitFor();

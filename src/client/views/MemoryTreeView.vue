@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingIndicator from "@/client/components/LoadingIndicator.vue";
 import { onMounted, ref } from "vue";
 import { ByteCache } from "@/shared/byte-cache";
 import { getMemoryTree, expandMemoryNode } from "@/client/lib/api";
@@ -75,7 +76,7 @@ onMounted(load);
 </script>
 
 <template>
-  <main ref="container" class="memory-tree" :aria-busy="loading">
+  <main ref="container" class="memory-tree">
     <header>
       <RouterLink v-if="!embedded" to="/">Back to chat</RouterLink>
       <h1 v-if="!embedded" ref="heading" tabindex="-1">Memory tree</h1>
@@ -101,24 +102,30 @@ onMounted(load);
         Back / collapse
       </button>
     </div>
-    <p v-if="loading" role="status">Loading…</p>
+    <LoadingIndicator :label="loading ? 'Loading memory tree' : undefined" />
     <div v-if="error" role="alert">
       <p>{{ error }}</p>
       <button v-if="!overview" type="button" :disabled="loading" @click="load">Retry</button>
     </div>
-    <section v-if="path.length" class="selected-node" aria-label="Selected node">
+    <section
+      v-if="path.length"
+      class="selected-node"
+      aria-label="Selected node"
+      :aria-busy="loading"
+    >
       <h2>{{ path.at(-1)!.id }}+{{ path.at(-1)!.count }}</h2>
       <p>{{ path.at(-1)!.summary }}</p>
     </section>
     <section
       v-if="expansion?.text !== undefined"
       aria-label="Original message"
+      :aria-busy="loading"
       class="original-message"
     >
       <h2>Original message</h2>
       <pre>{{ expansion.text }}</pre>
     </section>
-    <section v-else aria-label="Memory nodes" class="nodes">
+    <section v-else aria-label="Memory nodes" class="nodes" :aria-busy="loading">
       <p v-if="overview && !overview.nodes.length">No prepared memory yet.</p>
       <button
         v-for="node in expansion?.children ?? overview?.nodes ?? []"

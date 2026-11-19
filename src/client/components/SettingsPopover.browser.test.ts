@@ -327,6 +327,65 @@ test("Remote settings shows automatic peer names, offline status and pairing err
   }
 });
 
+test.each([1280, 390])("AGENTS and memory loading spinners at %ipx", async (width) => {
+  const mobile = width < 600;
+  const page = await browser.newPage({
+    viewport: { width, height: 900 },
+    isMobile: mobile,
+    hasTouch: mobile,
+    reducedMotion: mobile ? "reduce" : "no-preference",
+  });
+  const instructions = Promise.withResolvers<string>();
+  const memory = Promise.withResolvers<void>();
+  try {
+    await fixtureOperation(server, page, "assistant-agents.get", async () => ({
+      value: { content: await instructions.promise },
+    }));
+    await fixtureOperation(server, page, "memory.tree", async () => {
+      await memory.promise;
+      return { value: { nodes: [], prepared: 0, total: 0 } };
+    });
+    await page.goto(url);
+    await page.getByRole("button", { name: "Assistant workspace AGENTS.md" }).click();
+    const popover = page.locator("#settings-agents-editor");
+    const loading = popover.getByRole("status", { name: "Loading AGENTS.md", exact: true });
+    const spinner = loading.locator(".spinner");
+    await spinner.waitFor();
+    expect(
+      await loading
+        .locator(".loading-indicator__text")
+        .evaluate((el) => getComputedStyle(el).clipPath),
+    ).toBe("inset(50%)");
+    expect(await spinner.getAttribute("aria-hidden")).toBe("true");
+    expect(await spinner.evaluate((el) => getComputedStyle(el).animationName)).toBe(
+      mobile ? "none" : "spin",
+    );
+    expect(await popover.getByRole("button", { name: "Save", exact: true }).isDisabled()).toBe(
+      true,
+    );
+    const editor = popover.getByRole("textbox", { name: "AGENTS.md instructions" });
+    expect(await editor.count()).toBe(0);
+    instructions.resolve("Workspace instructions");
+    await editor.waitFor();
+    expect(await editor.inputValue()).toBe("Workspace instructions");
+    await loading.waitFor({ state: "detached" });
+    expect(await popover.getByRole("button", { name: "Save", exact: true }).isEnabled()).toBe(true);
+    await popover.getByRole("button", { name: "Close popover" }).click();
+
+    await page.getByRole("button", { name: "Memory tree", exact: true }).click();
+    const memoryLoading = page.getByRole("status", { name: "Loading memory tree" });
+    await memoryLoading.locator(".spinner").waitFor();
+    expect(await memoryLoading.textContent()).toBe("Loading memory tree");
+    memory.resolve();
+    await page.getByText("No prepared memory yet.").waitFor();
+    await memoryLoading.waitFor({ state: "detached" });
+  } finally {
+    instructions.resolve("");
+    memory.resolve();
+    await page.close();
+  }
+});
+
 for (const width of [390]) {
   test(`settings controls, drafts and nested editors at ${width}px`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 } });

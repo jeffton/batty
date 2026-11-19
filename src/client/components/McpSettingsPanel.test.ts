@@ -34,10 +34,13 @@ it("shows settings before slow status, then keeps known MCPs while reopening", a
   vi.mocked(api.getMcpSettings).mockResolvedValueOnce(sharedSettings);
   vi.mocked(api.getMcpStatus).mockReturnValueOnce(pendingStatus.promise);
   const wrapper = mount(McpSettingsPanel, { props: { active: true } });
-  expect(wrapper.get('[role="status"]').text()).toContain("Loading MCPs");
+  expect(wrapper.find('[role="status"][aria-label="Loading MCPs"] .spinner').exists()).toBe(true);
   await flushPromises();
   expect(wrapper.get("article strong").text()).toBe("shared");
-  expect(wrapper.text()).toContain("Loading status");
+  expect(
+    wrapper.find('[role="status"][aria-label="Loading status for shared"] .spinner').exists(),
+  ).toBe(true);
+  expect(wrapper.text()).not.toContain("Status unavailable");
   pendingStatus.resolve({
     servers: [
       {
@@ -51,14 +54,14 @@ it("shows settings before slow status, then keeps known MCPs while reopening", a
     errors: [],
   });
   await flushPromises();
-  expect(wrapper.find('[role="status"]').exists()).toBe(false);
+  expect(wrapper.find('[role="status"][aria-label]').exists()).toBe(false);
   await wrapper.setProps({ active: false });
   expect(wrapper.get("article strong").text()).toBe("shared");
   const refresh = Promise.withResolvers<McpSettingsResponse>();
   vi.mocked(api.getMcpSettings).mockReturnValueOnce(refresh.promise);
   await wrapper.setProps({ active: true });
   expect(wrapper.get("article strong").text()).toBe("shared");
-  expect(wrapper.find('[role="status"]').exists()).toBe(true);
+  expect(wrapper.find('[role="status"][aria-label="Loading MCPs"]').exists()).toBe(true);
   refresh.resolve({ servers: [], errors: [] });
   await flushPromises();
   expect(wrapper.find("article").exists()).toBe(false);
@@ -88,7 +91,7 @@ it("shows settings failures without presenting a configured-empty state", async 
   await flushPromises();
   expect(wrapper.get('[role="alert"]').text()).toContain("Settings unavailable");
   expect(wrapper.text()).not.toContain("No MCP servers configured");
-  expect(wrapper.find('[role="status"]').exists()).toBe(false);
+  expect(wrapper.find('[role="status"][aria-label]').exists()).toBe(false);
   wrapper.unmount();
 });
 
@@ -99,7 +102,7 @@ it("ignores stale results and failures after close/reopen", async () => {
   vi.mocked(api.getMcpStatus).mockReturnValueOnce(oldStatus.promise);
   const wrapper = mount(McpSettingsPanel, { props: { active: true } });
   await wrapper.setProps({ active: false });
-  expect(wrapper.attributes("aria-busy")).toBe("false");
+  expect(wrapper.find('[role="status"][aria-label="Loading MCPs"]').exists()).toBe(false);
   vi.mocked(api.getMcpSettings).mockResolvedValueOnce(sharedSettings);
   await wrapper.setProps({ active: true });
   await flushPromises();
@@ -108,7 +111,7 @@ it("ignores stale results and failures after close/reopen", async () => {
   await flushPromises();
   expect(wrapper.get("article strong").text()).toBe("shared");
   expect(wrapper.text()).not.toContain("Old failure");
-  expect(wrapper.attributes("aria-busy")).toBe("false");
+  expect(wrapper.find('[role="status"][aria-label="Loading MCPs"]').exists()).toBe(false);
   wrapper.unmount();
 });
 

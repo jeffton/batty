@@ -257,7 +257,7 @@ try {
     const restoreMs = Date.now() - started;
     await page.locator("textarea").fill("An offline draft");
     assert(await page.getByRole("button", { name: "Send prompt", exact: true }).isDisabled());
-    assert.equal(await page.getByText("Loading chat…", { exact: true }).count(), 0);
+    assert.equal(await page.getByRole("status", { name: "Loading chat", exact: true }).count(), 0);
     assert(await page.evaluate(async (url) => (await fetch(url)).ok, previewUrl, undefined, false));
     await debug.send("ServiceWorker.enable");
     await debug.send("ServiceWorker.stopAllWorkers");

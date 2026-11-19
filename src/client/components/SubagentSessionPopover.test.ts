@@ -15,6 +15,7 @@ import { RpcError } from "@/shared/rpc";
 import { getSessionMessages, stopCronRun, stopSubagent } from "@/client/lib/api";
 import { rpcCall } from "@/client/lib/rpc";
 
+const nonLoadingStatus = '[role="status"]:not(.loading-indicator__status)';
 const session = {
   id: "worker",
   sessionId: "worker",
@@ -165,13 +166,13 @@ test("a healthy local stream preserves remote offline status and disables action
     expect(wrapper.getComponent({ name: "SessionHeaderStatus" }).props("connectionState")).toBe(
       "offline",
     );
-    expect(wrapper.get('[role="status"]').text()).toContain("Last known: running");
+    expect(wrapper.get(nonLoadingStatus).text()).toContain("Last known: running");
     expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeDefined();
     await send(false, 3);
     expect(wrapper.getComponent({ name: "SessionHeaderStatus" }).props("connectionState")).toBe(
       "online",
     );
-    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    expect(wrapper.find(nonLoadingStatus).exists()).toBe(false);
     expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeUndefined();
   } finally {
     wrapper.unmount();
@@ -334,7 +335,7 @@ test("missing local or remote sessions show an empty state, not a connection fai
     });
     wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
     await flushPromises();
-    expect(wrapper.get('[role="status"]').text()).toBe("This session is no longer available.");
+    expect(wrapper.get(nonLoadingStatus).text()).toBe("This session is no longer available.");
     expect(wrapper.findComponent({ name: "SessionHeaderStatus" }).exists()).toBe(false);
     expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(false);
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
@@ -461,7 +462,7 @@ test("a deleted session clears a cached transcript when reopened", async () => {
   toggle("open");
   await flushPromises();
   expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(false);
-  expect(wrapper.get('[role="status"]').text()).toBe("This session is no longer available.");
+  expect(wrapper.get(nonLoadingStatus).text()).toBe("This session is no longer available.");
   expect(close).toHaveBeenCalled();
   wrapper.unmount();
 });
@@ -488,7 +489,7 @@ test("server and network errors remain errors, not missing-session empty states"
     wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
     await flushPromises();
     expect(wrapper.get(".subagent-session-popover__empty--error").text()).toBe(error.message);
-    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    expect(wrapper.find(nonLoadingStatus).exists()).toBe(false);
     wrapper.unmount();
   }
 });
@@ -527,7 +528,7 @@ test.each([
     wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
     await flushPromises();
     expect(wrapper.text()).not.toContain(error.message);
-    expect(wrapper.get('[role="status"]').text()).toBe("Offline — reconnecting…");
+    expect(wrapper.get(nonLoadingStatus).text()).toBe("Offline — reconnecting…");
     await vi.advanceTimersByTimeAsync(2000);
     await flushPromises();
     expect(sources).toHaveLength(1);

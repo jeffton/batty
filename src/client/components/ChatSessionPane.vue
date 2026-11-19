@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingIndicator from "@/client/components/LoadingIndicator.vue";
 import { computed, ref, watch } from "vue";
 import ChatHeader from "@/client/components/ChatHeader.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
@@ -314,10 +315,7 @@ async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
 
     <div v-if="!store.activeSession" class="chat-loading">
       <p v-if="store.lastError" role="alert">{{ store.lastError }}</p>
-      <template v-else
-        ><div class="spinner" />
-        <p class="muted">Loading chat…</p></template
-      >
+      <LoadingIndicator :label="store.lastError ? undefined : 'Loading chat'" large />
     </div>
     <template v-else>
       <SessionTranscriptView

@@ -48,7 +48,7 @@ function app() {
 
 test("old/missing cached schedule cannot flash routed UI before fresh config arrives", async () => {
   app();
-  expect(wrapper.text()).toContain("Booting Batty");
+  expect(wrapper.find('[role="status"][aria-label="Booting Batty"] .spinner').exists()).toBe(true);
   expect(wrapper.find("#routed-action").exists()).toBe(false);
   mocks.store.settings.workingHours = schedule;
   finishBootstrap();

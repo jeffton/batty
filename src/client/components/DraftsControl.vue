@@ -42,7 +42,7 @@ defineExpose({ close: () => popover.value?.hidePopover() });
       class="composer-list-popover"
       floating
       anchor-up
-      align-viewport-right
+      align-anchor-left
       role="dialog"
       aria-label="Drafts"
       @toggle="($event as ToggleEvent).newState === 'open' && emit('open')"

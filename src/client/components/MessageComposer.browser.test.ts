@@ -132,18 +132,32 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     await composer(first).fill("Unsaved new text");
     await open(first).focus();
     await open(first).press("Enter");
-    const checkPopoverAlignment = async (page: Page) => {
-      const { width } = page.viewportSize()!;
+    const checkPopoverAlignment = async (page: Page, placement: "trigger" | "clamped") => {
       await expect
         .poll(async () => {
-          const bounds = await list(page).boundingBox();
-          return bounds && Math.abs(width - bounds.x - bounds.width - 8) < 1 && bounds.x >= 7;
+          const [trigger, panel] = await Promise.all([
+            open(page).boundingBox(),
+            list(page).boundingBox(),
+          ]);
+          if (!trigger || !panel) return null;
+          const right = page.viewportSize()!.width - 8;
+          return {
+            underTrigger: Math.abs(panel.x - trigger.x) < 1,
+            atRightLimit: Math.abs(panel.x + panel.width - right) < 1,
+            fitsAtTrigger: trigger.x + panel.width <= right,
+            withinViewport: panel.x >= 7 && panel.x + panel.width <= right + 1,
+          };
         })
-        .toBe(true);
+        .toEqual({
+          underTrigger: placement === "trigger",
+          atRightLimit: placement === "clamped",
+          fitsAtTrigger: placement === "trigger",
+          withinViewport: true,
+        });
     };
-    await checkPopoverAlignment(first);
+    await checkPopoverAlignment(first, "clamped");
     await first.setViewportSize({ width: 390, height: 640 });
-    await checkPopoverAlignment(first);
+    await checkPopoverAlignment(first, "clamped");
     await first.keyboard.press("Escape");
     await list(first).waitFor({ state: "hidden" });
     await open(first).tap();
@@ -183,7 +197,14 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     await second.goto(draftUrl);
     await second.getByRole("button", { name: "Drafts: 1 draft" }).waitFor();
     await open(second).click();
-    await checkPopoverAlignment(second);
+    await checkPopoverAlignment(second, "trigger");
+    // Moving the toolbar to a smaller window flips to collision clamping,
+    // and a wider window restores the button alignment without reopening.
+    const desktopViewport = second.viewportSize()!;
+    await second.setViewportSize({ width: 530, height: 640 });
+    await checkPopoverAlignment(second, "clamped");
+    await second.setViewportSize(desktopViewport);
+    await checkPopoverAlignment(second, "trigger");
     await checkSavePlacement(second);
     expect(await save(second).isDisabled()).toBe(true);
     await list(second)

@@ -366,6 +366,7 @@ test("keeps stream controls centered independently of the left and right compose
       await capture("idle");
       await context.setOffline(true);
       await expect.poll(() => connection.getAttribute("aria-label")).toBe("Offline");
+      await page.getByText("Offline", { exact: true }).waitFor({ state: "visible" });
       expect(await send.isDisabled()).toBe(true);
       expect(await geometry()).toEqual({ ...active, t: null, g: null });
       await capture("offline");

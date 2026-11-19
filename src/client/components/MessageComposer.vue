@@ -658,7 +658,7 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
         </button>
         <p v-if="props.error" class="composer__notice composer__notice--error">{{ props.error }}</p>
         <p v-if="fileError" class="composer__notice composer__notice--error">{{ fileError }}</p>
-        <p v-if="props.offline" class="composer__notice">Offline. Draft saved locally</p>
+        <p v-if="props.offline" class="composer__notice">Offline</p>
       </div>
 
       <ComposerQueuedPrompts

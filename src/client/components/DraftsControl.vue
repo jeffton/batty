@@ -36,27 +36,30 @@ defineExpose({ close: () => popover.value?.hidePopover() });
         <span class="composer-count-control__status" />
       </span>
     </button>
-    <button
-      type="button"
-      class="chrome-button drafts-control__save"
-      title="Save to drafts"
-      aria-label="Save to drafts"
-      :disabled="!props.canSave"
-      @click="emit('save')"
-    >
-      <FilePlus :size="17" aria-hidden="true" />
-    </button>
     <BasePopover
       :id="id"
       ref="popover"
       class="composer-list-popover"
       floating
       anchor-up
+      align-viewport-right
       role="dialog"
       aria-label="Drafts"
       @toggle="($event as ToggleEvent).newState === 'open' && emit('open')"
     >
-      <header class="composer-list-popover__header">Drafts</header>
+      <header class="composer-list-popover__header drafts-control__header">
+        <span>Drafts</span>
+        <button
+          type="button"
+          class="chrome-button drafts-control__save"
+          title="Save to drafts"
+          aria-label="Save to drafts"
+          :disabled="!props.canSave"
+          @click="emit('save')"
+        >
+          <FilePlus :size="17" aria-hidden="true" />
+        </button>
+      </header>
       <div class="composer-list-popover__list">
         <p v-if="props.error" class="drafts-control__error" role="status">{{ props.error }}</p>
         <p v-if="!props.drafts.length" class="composer-list-popover__empty">No drafts.</p>
@@ -98,6 +101,13 @@ defineExpose({ close: () => popover.value?.hidePopover() });
   display: flex;
   align-items: center;
   min-width: 0;
+}
+
+.drafts-control__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.25rem 0 1rem;
 }
 
 .drafts-control__save,

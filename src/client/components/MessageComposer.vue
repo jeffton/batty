@@ -905,7 +905,7 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
 }
 
 .composer__actions-row--drafts {
-  grid-template-columns: 44px minmax(44px, 6rem) minmax(88px, max-content) 44px 44px;
+  grid-template-columns: 44px minmax(44px, 6rem) minmax(44px, max-content) 44px 44px;
 }
 
 .composer__icon-button {

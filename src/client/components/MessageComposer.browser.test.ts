@@ -89,20 +89,32 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     const second = await desktop.newPage();
     const draftUrl = `${url}?drafts&tasks&streaming`;
     const composer = (page: Page) => page.getByRole("textbox", { name: "Chat message" });
-    const save = (page: Page) => page.getByRole("button", { name: "Save to drafts" });
     const open = (page: Page) => page.getByRole("button", { name: /^Drafts:/ });
     const list = (page: Page) => page.getByRole("dialog", { name: "Drafts" });
-    const checkButtonOrder = async (page: Page) => {
-      const [draftsButton, saveButton] = await Promise.all([
-        open(page).boundingBox(),
+    const header = (page: Page) => list(page).locator("header");
+    const save = (page: Page) => header(page).getByRole("button", { name: "Save to drafts" });
+    const checkSavePlacement = async (page: Page) => {
+      const [title, button, box] = await Promise.all([
+        header(page).getByText("Drafts", { exact: true }).boundingBox(),
         save(page).boundingBox(),
+        header(page).boundingBox(),
       ]);
-      expect(draftsButton!.x + draftsButton!.width).toBeLessThanOrEqual(saveButton!.x);
-      expect(saveButton!.y).toBe(draftsButton!.y);
+      expect(button!.width).toBe(44);
+      expect(button!.height).toBe(44);
+      expect(button!.x).toBeGreaterThan(title!.x + title!.width);
+      expect(box!.x + box!.width - button!.x - button!.width).toBeLessThan(8);
     };
     await first.goto(draftUrl);
-    await checkButtonOrder(first);
     await phone.setOffline(true);
+    expect(
+      await first.locator('.composer__actions-row button[aria-label="Save to drafts"]').count(),
+    ).toBe(0);
+    await open(first).tap();
+    await save(first).waitFor();
+    expect(await save(first).isDisabled()).toBe(true);
+    await checkSavePlacement(first);
+    await first.keyboard.press("Escape");
+    await list(first).waitFor({ state: "hidden" });
     await composer(first).fill("Offline original\nSecond line");
     await first.locator('input[type="file"]').setInputFiles({
       name: 'a"b.txt',
@@ -110,18 +122,28 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
       buffer: Buffer.from("attachment bytes"),
     });
     await first.getByRole("button", { name: 'a"b.txt ×' }).waitFor();
-    await open(first).focus();
-    await open(first).press("Tab");
-    expect(await save(first).evaluate((node) => document.activeElement === node)).toBe(true);
+    await open(first).tap();
     await save(first).tap();
     await first.getByRole("button", { name: "Drafts: 1 draft" }).waitFor();
     expect(await composer(first).inputValue()).toBe("");
+    expect(await save(first).isDisabled()).toBe(true);
+    await first.keyboard.press("Escape");
+    await list(first).waitFor({ state: "hidden" });
     await composer(first).fill("Unsaved new text");
     await open(first).focus();
     await open(first).press("Enter");
-    const bounds = await list(first).boundingBox();
-    expect(bounds?.x).toBeGreaterThanOrEqual(0);
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
+    const checkPopoverAlignment = async (page: Page) => {
+      const { width } = page.viewportSize()!;
+      await expect
+        .poll(async () => {
+          const bounds = await list(page).boundingBox();
+          return bounds && Math.abs(width - bounds.x - bounds.width - 8) < 1 && bounds.x >= 7;
+        })
+        .toBe(true);
+    };
+    await checkPopoverAlignment(first);
+    await first.setViewportSize({ width: 390, height: 640 });
+    await checkPopoverAlignment(first);
     await first.keyboard.press("Escape");
     await list(first).waitFor({ state: "hidden" });
     await open(first).tap();
@@ -160,13 +182,26 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
       .toEqual(["Failed prompt"]);
     await second.goto(draftUrl);
     await second.getByRole("button", { name: "Drafts: 1 draft" }).waitFor();
-    await checkButtonOrder(second);
     await open(second).click();
+    await checkPopoverAlignment(second);
+    await checkSavePlacement(second);
+    expect(await save(second).isDisabled()).toBe(true);
     await list(second)
       .getByRole("button", { name: /^Failed prompt/ })
       .click();
     await second.getByRole("button", { name: "failed.txt ×" }).waitFor();
     expect(await composer(second).inputValue()).toBe("Failed prompt");
+    await expect.poll(async () => (await api.inject("/api/drafts")).json().drafts).toEqual([]);
+    await open(second).focus();
+    await open(second).press("Enter");
+    await save(second).waitFor();
+    expect(await save(second).isEnabled()).toBe(true);
+    await save(second).press("Enter");
+    await second.getByRole("button", { name: "Drafts: 1 draft" }).waitFor();
+    expect(await composer(second).inputValue()).toBe("");
+    expect(await save(second).isDisabled()).toBe(true);
+    await list(second).getByRole("button", { name: "Delete draft: Failed prompt" }).click();
+    await second.getByRole("button", { name: "Drafts: 0 drafts" }).waitFor();
     await expect.poll(async () => (await api.inject("/api/drafts")).json().drafts).toEqual([]);
     await first.bringToFront();
     await first.keyboard.press("Escape");

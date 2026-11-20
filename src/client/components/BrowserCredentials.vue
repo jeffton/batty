@@ -4,6 +4,7 @@ import { rpcCall } from "@/client/lib/rpc";
 import type { CloudBrowserState } from "@/shared/cloud-browser";
 
 const props = defineProps<{ browserId: string; state: CloudBrowserState }>();
+const form = ref<HTMLFormElement>();
 const username = ref<HTMLInputElement>();
 const password = ref<HTMLInputElement>();
 const origin = computed(() => new URL(props.state.url).origin);
@@ -23,6 +24,7 @@ let inFlight = false;
 let pending = false;
 let transferAttempted = false;
 let composing = false;
+let lastFocusedField: HTMLInputElement | undefined;
 
 function identity(): string {
   return JSON.stringify([
@@ -73,7 +75,9 @@ function observe(immediate = false): void {
   if (immediate) void fill();
   else timer = setTimeout(() => void fill(), settleMs);
 }
-function focusIn(): void {
+function focusIn(event: FocusEvent): void {
+  if (event.target === username.value || event.target === password.value)
+    lastFocusedField = event.target as HTMLInputElement;
   observe();
   // Some iOS password managers write DOM values without input/change on both fields.
   // Observe only while editing the login panel, and take one last reading on blur.
@@ -159,9 +163,14 @@ function canInteractWithPage(): boolean {
   const value = values();
   return !inFlight && !composing && (complete(value) ? equal(filled, value) : !transferAttempted);
 }
-defineExpose({ canInteractWithPage, transferring });
+function isEditing(): boolean {
+  return transferring.value || !!form.value?.contains(document.activeElement);
+}
+defineExpose({ canInteractWithPage, isEditing, transferring });
 
 function retry(): void {
+  // Retry disappears once activated. Return focus to the field, not the page body.
+  (lastFocusedField ?? (props.state.login?.username ? username.value : password.value))?.focus();
   error.value = false;
   observe(true);
 }
@@ -169,6 +178,7 @@ function retry(): void {
 
 <template>
   <form
+    ref="form"
     class="browser-credentials"
     autocomplete="on"
     :aria-label="`Remote login at ${origin}`"

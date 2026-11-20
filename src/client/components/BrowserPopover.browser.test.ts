@@ -356,15 +356,28 @@ test("autofill detects login steps without submitting or exposing values to cont
     const retry = panel.getByRole("button", { name: "Retry" });
     await retry.waitFor();
     expect(await password.inputValue()).toBe("test-corrected-password");
+    await retry.focus();
+    // Focus is on the Retry button when the mobile keyboard is dismissed, not an input.
+    // The remote frame geometry must not change and discard the local login form.
+    const beforeRetry = await service.cloudState(attachedBrowserId);
+    await page.setViewportSize({ width: 390, height: 480 });
+    await expect
+      .poll(() =>
+        page.locator(".browser-popover").evaluate((node) => node.getBoundingClientRect().bottom),
+      )
+      .toBeGreaterThan(430);
     await retry.press("Enter");
+    expect(await password.evaluate((node) => node === document.activeElement)).toBe(true);
     await expect
       .poll(() => remote.locator('[name="password"]').inputValue(), { timeout: 10_000 })
       .toBe("test-corrected-password");
     const keyboardBounds = (await password.boundingBox())!;
-    expect(keyboardBounds.y + keyboardBounds.height).toBeLessThanOrEqual(430);
+    expect(keyboardBounds.y + keyboardBounds.height).toBeLessThanOrEqual(480);
+    expect((await service.cloudState(attachedBrowserId)).revision).toBe(beforeRetry.revision);
     await password.press("Enter");
     expect(await remote.locator("body").getAttribute("data-submitted")).toBeNull();
     expect(controls.join("\n")).not.toMatch(/test-(?:local|corrected)-password/);
+    await page.setViewportSize({ width: 390, height: 844 });
     const readyState = await fittedViewerFrame(page);
     const readyCanvas = (await page.locator(".cloud-browser__image").boundingBox())!;
     const readySignIn = (await remote.getByRole("button", { name: "Sign in" }).boundingBox())!;

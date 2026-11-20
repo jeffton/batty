@@ -122,7 +122,9 @@ async function resizeViewport(): Promise<void> {
   const deviceScaleFactor = Math.min(3, Math.max(1, window.devicePixelRatio));
   // Keep keyboard-only height changes stable, but still fit rotation/device changes.
   if (
-    (editing.value || document.activeElement?.tagName === "INPUT") &&
+    (editing.value ||
+      credentials.value?.isEditing() ||
+      document.activeElement?.tagName === "INPUT") &&
     state.value?.width === width &&
     state.value.mobile === mobile &&
     state.value.deviceScaleFactor === deviceScaleFactor

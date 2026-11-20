@@ -472,6 +472,62 @@ async function expectCompactAddressRow(page: Page) {
   expect(addressBounds.x + addressBounds.width).toBeLessThanOrEqual(page.viewportSize()!.width);
 }
 
+test("initial login frame fills mobile viewport before focusing local fields", async () => {
+  const context = await browser.newContext({
+    viewport: { width: 393, height: 751 },
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+  });
+  try {
+    await service.execute("integration", {
+      action: "open",
+      url: `${backendUrl}/login`,
+      cloud: true,
+    });
+    attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
+      .sites![0]!.browserId!;
+    await context.addCookies([
+      { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
+    ]);
+    const page = await context.newPage();
+    await page.goto(url);
+    const open = page.getByRole("button", { name: "Open browser", exact: true });
+    const panel = page.getByRole("form", { name: /Remote login at/ });
+    await open.click();
+    await panel.waitFor();
+    const fit = await fittedViewerFrame(page);
+    await page.getByRole("button", { name: "Close popover", exact: true }).click();
+    await panel.waitFor({ state: "hidden" });
+    const remote = (await service.cloudTarget(attachedBrowserId)).page;
+    await service.cloudControl(attachedBrowserId, {
+      action: "viewport",
+      width: fit.width,
+      height: fit.height - 30,
+      mobile: fit.mobile,
+      deviceScaleFactor: fit.deviceScaleFactor,
+    });
+    await remote.getByRole("textbox", { name: "Username" }).focus();
+    expect((await service.cloudState(attachedBrowserId)).focused).toBeDefined();
+    await open.click();
+    await panel.waitFor();
+    expect(await panel.locator("input:focus").count()).toBe(0);
+    await fittedViewerFrame(page);
+    const geometry = await page.locator("canvas").evaluate((node: HTMLCanvasElement) => {
+      const canvas = node.getBoundingClientRect();
+      const viewport = node.parentElement!.getBoundingClientRect();
+      return {
+        gap: viewport.bottom - canvas.bottom,
+        horizontal: viewport.width - canvas.width,
+      };
+    });
+    expect(Math.abs(geometry.gap)).toBeLessThanOrEqual(2);
+    expect(Math.abs(geometry.horizontal)).toBeLessThanOrEqual(2);
+  } finally {
+    await context.close();
+  }
+}, 30_000);
+
 async function inspect(script: string) {
   // Read the same live page without an agent action invalidating its revision.
   return (await service.cloudTarget(attachedBrowserId)).page.evaluate(

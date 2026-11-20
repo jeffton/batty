@@ -120,12 +120,13 @@ async function resizeViewport(): Promise<void> {
   });
   const mobile = navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches;
   const deviceScaleFactor = Math.min(3, Math.max(1, window.devicePixelRatio));
-  // Keep keyboard-only height changes stable, but still fit rotation/device changes.
+  // Keep the generic editor's frame stable from the moment it mounts.
+  // Remote focus alone must not pin the height when the login panel replaces it.
   if (
-    (editing.value ||
+    (!!editor.value ||
+      document.activeElement === addressInput.value ||
       (credentials.value &&
-        (credentials.value.isEditing() || !credentials.value.canInteractWithPage())) ||
-      document.activeElement?.tagName === "INPUT") &&
+        (credentials.value.isEditing() || !credentials.value.canInteractWithPage()))) &&
     state.value?.width === width &&
     state.value.mobile === mobile &&
     state.value.deviceScaleFactor === deviceScaleFactor

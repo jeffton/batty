@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import sqlite3
 
+from artifact_rows import ArtifactRows, fingerprint
+
 # Pi Durable 1.4 / durable schema 2 and Batty's derived indexes. Session documents,
 # record_ids, durable_metadata and all filesystem artifacts are deliberately absent.
 COLUMNS = {
@@ -30,6 +32,13 @@ ORDER = list(COLUMNS)
 ALLOWED_TABLES = set(ORDER) | {
     "durable_schema", "durable_metadata", "record_ids",
     *("batty_memory_search_" + suffix for suffix in ("data", "idx", "content", "docsize", "config")),
+}
+# Global immutable bodies are not part of a worker tree. Backups can only be
+# restored to the same database inode; these tables are never pruned.
+ARTIFACT_TABLES = {
+    "batty_artifact_text_v1": ["digest", "body"],
+    "batty_artifact_encoding_v1": ["id", "namespace", "writes_enabled"],
+    "batty_artifact_rows_v1": ["owner", "identity", "digest"],
 }
 
 
@@ -67,8 +76,11 @@ def schema_hash(db):
         "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name"
     ).fetchall()
     tables = {row[1] for row in schema if row[0] == "table"}
-    if tables != ALLOWED_TABLES:
+    if tables not in (ALLOWED_TABLES, ALLOWED_TABLES | ARTIFACT_TABLES.keys()):
         raise ValueError(f"Unsupported tables: {sorted(tables ^ ALLOWED_TABLES)}")
+    for table, columns in ARTIFACT_TABLES.items():
+        if table in tables and [row[1] for row in db.execute(f"PRAGMA table_info({quoted(table)})")] != columns:
+            raise ValueError(f"Unsupported columns: {table}")
     if db.execute("SELECT * FROM durable_schema").fetchall() != [(1, 2)]:
         raise ValueError("Unsupported durable schema")
     for table, columns in COLUMNS.items():
@@ -83,7 +95,7 @@ def schema_hash(db):
                "CREATE TRIGGER BATTY_COUNT_ENTRY AFTER INSERT ON ENTRIES BEGIN "
            ) for row in triggers):
         raise ValueError("Unsupported trigger")
-    return sha(row_bytes(schema))
+    return sha(row_bytes([row for row in schema if row[2] not in ARTIFACT_TABLES]))
 
 
 def expected_members(root, expected):
@@ -144,7 +156,16 @@ def rows(db, table, backup=False):
     return db.execute(f"SELECT {fields(table)} FROM {quoted(source)}{where} ORDER BY {order}")
 
 
-def summarize(db, backup=False, destination=None):
+def artifact_identity(table, row):
+    if table == "document_revisions":
+        return f"{row[0]}:{row[1]}"
+    if table in ("entries", "tasks"):
+        return str(row[0])
+    return None
+
+
+def summarize(db, backup=False, destination=None, artifact_rows=None):
+    artifacts = ArtifactRows(db) if artifact_rows is not None else None
     result = {}
     for table in ORDER:
         digest = hashlib.sha256()
@@ -152,6 +173,9 @@ def summarize(db, backup=False, destination=None):
         for row in rows(db, table, backup):
             digest.update(hashlib.sha256(row_bytes(row)).digest())
             count += 1
+            if artifacts is not None and (identity := artifact_identity(table, row)) is not None:
+                if artifacts.packed(table, identity, row[-1]):
+                    artifact_rows[f"{table}/{identity}"] = fingerprint(row[-1])
             if destination is not None:
                 destination.execute(
                     f"INSERT INTO {quoted('b_' + table)} VALUES ({','.join('?' for _ in row)})", row
@@ -376,11 +400,12 @@ def make_backup(target, destination, root, expected):
             names = ",".join(map(quoted, columns))
             keys = ",".join(map(quoted, KEYS[table]))
             backup.execute(f"CREATE TABLE {quoted('b_' + table)} ({names}, PRIMARY KEY ({keys}))")
-        counts = summarize(source, destination=backup)
+        artifact_rows = {}
+        counts = summarize(source, destination=backup, artifact_rows=artifact_rows)
         manifest = {"format": 1, "database": str(Path(target).resolve()),
                     "identity": source_identity(target), "schema_sha256": schema,
                     "root": root, "members": members, "columns": COLUMNS, "keys": KEYS,
-                    "identities": identities(source), "tables": counts}
+                    "identities": identities(source), "tables": counts, "artifact_rows": artifact_rows}
         raw = canonical(manifest)
         backup.execute("INSERT INTO manifest VALUES (?,?)", (raw, sha(raw.encode())))
         backup.commit()
@@ -429,6 +454,8 @@ def mutate(target, backup_path, root, expected, restore=False, quiesced=False):
             for table in reversed(ORDER):
                 db.execute(f"DELETE FROM {quoted(table)} WHERE {condition(table)}")
         else:
+            artifacts = ArtifactRows(db)
+            artifact_rows = dict(saved.get("artifact_rows", {}))
             task_ids = [row[0] for row in rows(backup, "tasks", backup=True)]
             document_ids = [row[0] for row in rows(backup, "documents", backup=True)]
             scopes(db, saved["members"], task_ids, document_ids)
@@ -454,7 +481,12 @@ def mutate(target, backup_path, root, expected, restore=False, quiesced=False):
                 db.execute("DROP TRIGGER batty_count_entry")
             for table in ORDER:
                 for row in rows(backup, table, backup=True):
+                    if (identity := artifact_identity(table, row)) is not None:
+                        digest = artifact_rows.pop(f"{table}/{identity}", None)
+                        artifacts.restore(table, identity, row[-1], digest)
                     db.execute(f"INSERT INTO {quoted(table)} ({fields(table)}) VALUES ({','.join('?' for _ in row)})", row)
+            if artifact_rows:
+                raise ValueError("Artifact fingerprint without a matching backup row")
             if trigger:
                 db.execute(trigger[0])
             prepare(db, root, expected)

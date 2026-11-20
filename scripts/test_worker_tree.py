@@ -166,6 +166,30 @@ class WorkerTreeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not empty|New child"):
             self.apply(restore=True)
 
+    def test_packed_backup_restores_row_provenance_only_with_packing_enabled(self):
+        self.db.executescript("""
+            CREATE TABLE batty_artifact_encoding_v1 (id INTEGER PRIMARY KEY, namespace TEXT, writes_enabled INTEGER);
+            INSERT INTO batty_artifact_encoding_v1 VALUES (1,'fixture',1);
+            CREATE TABLE batty_artifact_text_v1 (digest TEXT PRIMARY KEY, body TEXT);
+            CREATE TABLE batty_artifact_rows_v1 (owner TEXT, identity TEXT, digest TEXT, PRIMARY KEY(owner,identity));
+        """)
+        doc = self.document("fixture", 10, {"fileChanges": [{"path": "example", "patch": {"batty-artifact-v1:fixture:": "ref"}}]})
+        content = self.db.execute("SELECT content FROM document_revisions WHERE document_id=?", (doc,)).fetchone()[0]
+        expected = ("document_revisions", f"{doc}:1", tree.fingerprint(content))
+        self.db.execute("INSERT INTO batty_artifact_rows_v1 VALUES (?,?,?)", expected)
+        self.backup_now()
+        self.apply()
+        self.db.execute("DELETE FROM batty_artifact_rows_v1")
+        self.db.execute("UPDATE batty_artifact_encoding_v1 SET writes_enabled=0")
+        self.db.commit()
+        with self.assertRaisesRegex(ValueError, "inline-only"):
+            self.apply(restore=True)
+        self.assertEqual(self.db.execute("SELECT id FROM conversations").fetchall(), [(1,)])
+        self.db.execute("UPDATE batty_artifact_encoding_v1 SET writes_enabled=1")
+        self.db.commit()
+        self.apply(restore=True)
+        self.assertEqual(self.db.execute("SELECT * FROM batty_artifact_rows_v1").fetchall(), [expected])
+
     def test_exact_membership_and_nonworker(self):
         with self.assertRaisesRegex(ValueError, "membership"):
             tree.make_backup(self.target, self.backup, 10, [10])

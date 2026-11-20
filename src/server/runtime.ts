@@ -23,7 +23,7 @@ import {
   type LiveState,
   type InboxState,
 } from "@earendil-works/pi-durable";
-import { openNodeSqliteDatabase } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { openArtifactSqliteDatabase } from "./artifact-sqlite";
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -167,9 +167,9 @@ export class Runtime {
     registry.install(resources.extension);
     const baseExtensions = registry.snapshot().installed();
     const workspaces = await listWorkspaces(config);
-    const database = await openNodeSqliteDatabase(path.join(dir, "runtime.sqlite"));
-    await database.exec("PRAGMA synchronous = FULL");
+    const database = await openArtifactSqliteDatabase(path.join(dir, "runtime.sqlite"));
     const storage = await SqliteStorage.open(database);
+    database.enableArtifactWrites();
     const historyIndex = await createHistoryIndex(database);
     const harness = await Harness.open(
       storage,

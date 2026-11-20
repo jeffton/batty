@@ -8,6 +8,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from artifact_rows import ArtifactRows
+
 KIND = "batty.codemode-tool"
 COLUMNS = "id, conversation_id, kind, status, abort_requested, background, record"
 MARKER = {"released": True}
@@ -112,10 +114,13 @@ def candidates(db):
 
 def inventory(db, backup=None):
     protected = protected_tasks(db)
+    artifacts = ArtifactRows(db)
     stats = {"rows": 0, "original_record_bytes": 0, "replacement_record_bytes": 0}
     for row in candidates(db):
         if not eligible(db, row, protected):
             continue
+        if artifacts.packed("tasks", row[0], row[6]):
+            raise ValueError(f"Cannot rewrite packed task {row[0]} using legacy receipt maintenance")
         changed = replacement(row[6])
         stats["rows"] += 1
         stats["original_record_bytes"] += len(row[6].encode("utf-8"))
@@ -192,8 +197,11 @@ def mutate(target, backup_path, restore=False, chunk_size=1):
             db.execute("BEGIN IMMEDIATE")
             try:
                 protected = protected_tasks(db) if not restore else None
+                artifacts = ArtifactRows(db)
                 for saved in batch:
                     original, changed = saved[:7], saved[7]
+                    if artifacts.packed("tasks", saved[0], original[6]):
+                        raise ValueError(f"Cannot rewrite packed task {saved[0]} using legacy receipt maintenance")
                     current = db.execute(f"SELECT {COLUMNS} FROM tasks WHERE id=?", (saved[0],)).fetchone()
                     expected = (*original[:6], changed) if restore else original
                     if current != expected or (not restore and not eligible(db, current, protected)):

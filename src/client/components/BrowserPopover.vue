@@ -200,10 +200,7 @@ onBeforeUnmount(() => {
     <template #heading>
       <form
         class="cloud-browser__address"
-        :class="{
-          'cloud-browser__address--focused': addressFocused,
-          'cloud-browser__address--login': loginOrigin,
-        }"
+        :class="{ 'cloud-browser__address--focused': addressFocused }"
         @submit.prevent="navigate"
       >
         <button
@@ -271,29 +268,23 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </BasePopover>
-        <div
-          class="cloud-browser__location"
-          :class="{ 'cloud-browser__location--origin': loginOrigin && !addressFocused }"
-        >
-          <span v-if="loginOrigin && !addressFocused" aria-hidden="true">{{ loginOrigin }}</span>
-          <input
-            ref="addressInput"
-            :value="!addressFocused && loginOrigin ? loginOrigin : address"
-            aria-label="Browser address"
-            @input="address = ($event.target as HTMLInputElement).value"
-            @focus="focusAddress"
-            @blur="addressFocused = false"
-            @pointerdown="addressPointerDown"
-            @click="!addressWasFocused && selectAddress($event)"
-            type="text"
-            inputmode="url"
-            enterkeyhint="go"
-            autocapitalize="none"
-            autocorrect="off"
-            :spellcheck="false"
-            placeholder="Address"
-          />
-        </div>
+        <input
+          ref="addressInput"
+          :value="!addressFocused && loginOrigin ? loginOrigin : address"
+          aria-label="Browser address"
+          @input="address = ($event.target as HTMLInputElement).value"
+          @focus="focusAddress"
+          @blur="addressFocused = false"
+          @pointerdown="addressPointerDown"
+          @click="!addressWasFocused && selectAddress($event)"
+          type="text"
+          inputmode="url"
+          enterkeyhint="go"
+          autocapitalize="none"
+          autocorrect="off"
+          :spellcheck="false"
+          placeholder="Address"
+        />
       </form>
     </template>
     <div class="cloud-browser">
@@ -493,47 +484,11 @@ onBeforeUnmount(() => {
 .cloud-browser__address--focused > button {
   display: none;
 }
-@media (max-width: 480px) {
-  .cloud-browser__address--login:not(.cloud-browser__address--focused) {
-    display: grid;
-    grid-template-columns: repeat(3, max-content) minmax(0, 1fr);
-  }
-  .cloud-browser__address--login:not(.cloud-browser__address--focused) .cloud-browser__location {
-    grid-column: 1 / -1;
-  }
-  .browser-popover:has(.cloud-browser__address--login) :deep(.full-popover__header-actions) {
-    align-self: start;
-  }
-}
 .cloud-browser__address input {
   height: var(--button-size);
   min-height: var(--button-size);
 }
-.cloud-browser__location {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-}
-.cloud-browser__location input {
-  box-sizing: border-box;
-  width: 100%;
-}
-.cloud-browser__location--origin span {
-  display: block;
-  min-height: var(--button-size);
-  padding: 0.35rem 0.5rem;
-  align-content: center;
-  border: 1px solid var(--color-chrome-border);
-  border-radius: var(--chrome-control-radius);
-  background: var(--color-bg-panel-strong);
-  overflow-wrap: anywhere;
-}
-.cloud-browser__location--origin input {
-  position: absolute;
-  inset: 0;
-  height: 100%;
-  opacity: 0;
-}
+.cloud-browser__address input,
 .cloud-browser__editor input,
 .cloud-browser__editor textarea {
   flex: 1;

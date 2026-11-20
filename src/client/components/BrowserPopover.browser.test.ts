@@ -306,9 +306,11 @@ test("autofill detects login steps without submitting or exposing values to cont
     const address = page.getByRole("textbox", { name: "Browser address" });
     const remote = (await service.cloudTarget(attachedBrowserId)).page;
     expect(await address.inputValue()).toBe(new URL(backendUrl).origin);
-    const visibleOrigin = page.locator(".cloud-browser__location--origin span");
-    expect(await visibleOrigin.innerText()).toBe(new URL(backendUrl).origin);
-    expect(await visibleOrigin.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await expectCompactAddressRow(page);
+    await address.focus();
+    expect(await address.inputValue()).toBe(`${backendUrl}/login`);
+    await address.blur();
+    expect(await address.inputValue()).toBe(new URL(backendUrl).origin);
     expect(await panel.textContent()).not.toContain(new URL(backendUrl).origin);
     expect(await panel.getByRole("button").count()).toBe(0);
     const userBounds = (await username.boundingBox())!;
@@ -346,6 +348,7 @@ test("autofill detects login steps without submitting or exposing values to cont
     expect(await remote.locator('[name="username"]').inputValue()).toBe("test-manager-user");
     expect(await password.inputValue()).toBe("test-local-password");
     await page.setViewportSize({ width: 390, height: 430 });
+    await expectCompactAddressRow(page);
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.evaluate(() => navigator.clipboard.writeText("test-corrected-password"));
     await password.press("ControlOrMeta+a");
@@ -407,6 +410,22 @@ test("autofill detects login steps without submitting or exposing values to cont
     await context.close();
   }
 }, 30_000);
+
+async function expectCompactAddressRow(page: Page) {
+  const address = page.getByRole("textbox", { name: "Browser address" });
+  const addressBounds = (await address.boundingBox())!;
+  const names = ["Go back", "Reload page", "Choose tab", "Close popover"];
+  for (const name of names) {
+    const buttonBounds = (await page.getByRole("button", { name, exact: true }).boundingBox())!;
+    expect(
+      Math.abs(
+        buttonBounds.y + buttonBounds.height / 2 - addressBounds.y - addressBounds.height / 2,
+      ),
+    ).toBeLessThan(1);
+  }
+  expect(addressBounds.width).toBeGreaterThan(0);
+  expect(addressBounds.x + addressBounds.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+}
 
 async function inspect(script: string) {
   // Read the same live page without an agent action invalidating its revision.

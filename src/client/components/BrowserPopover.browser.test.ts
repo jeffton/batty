@@ -76,7 +76,7 @@ beforeAll(async () => {
     reply
       .type("text/html")
       .send(
-        `<!doctype html><meta name="viewport" content="width=device-width"><form onsubmit="event.preventDefault();window.submitted=true"><label>Username<input autocomplete="username" name="username"></label><label>Password<input name="password" type="password" autocomplete="current-password"></label><button>Sign in</button></form>`,
+        `<!doctype html><meta name="viewport" content="width=device-width"><form onsubmit="event.preventDefault();document.body.dataset.submitted='yes'"><label>Username<input autocomplete="username" name="username"></label><label>Password<input name="password" type="password" autocomplete="current-password"></label><button>Sign in</button></form>`,
       ),
   );
   backend.get("/popup", (_request, reply) =>
@@ -252,6 +252,32 @@ test("autofill detects login steps without submitting or exposing values to cont
     ]);
     const page = await context.newPage();
     const controls: string[] = [];
+    let rejectCorrection = true;
+    await fixtureOperation(
+      server,
+      page,
+      "browser.credentials.fill",
+      async (input, _context, next) => {
+        if (rejectCorrection && input.credentials.password === "test-corrected-password") {
+          rejectCorrection = false;
+          throw new Error("test-only transport failure");
+        }
+        return next();
+      },
+    );
+    let releasePrepare!: () => void;
+    const heldPrepare = new Promise<void>((resolve) => {
+      releasePrepare = resolve;
+    });
+    await fixtureOperation(
+      server,
+      page,
+      "browser.credentials.prepare",
+      async (_input, _context, next) => {
+        await heldPrepare;
+        return next();
+      },
+    );
     await fixtureOperation(server, page, "browser.control", async (input, _context, next) => {
       expect(input.browserId).toBe("opaque");
       controls.push(JSON.stringify(input.control));
@@ -274,25 +300,81 @@ test("autofill detects login steps without submitting or exposing values to cont
       )
       .toBe(true);
     await expect.poll(() => page.getByRole("status").count()).toBe(0);
-    await page.locator('.browser-credentials [name="username"]').fill("test-local-user");
-    await page.locator('.browser-credentials [name="password"]').fill("test-local-password");
-    expect(await page.locator(".browser-credentials__origin").innerText()).toBe(
-      new URL(backendUrl).origin,
-    );
-    const bounds = (await page.locator(".browser-credentials").boundingBox())!;
-    expect(bounds.x).toBeGreaterThanOrEqual(0);
-    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
-    await page.getByRole("button", { name: "Fill", exact: true }).click();
-    await expect
-      .poll(() => page.locator('.browser-credentials [name="password"]').inputValue())
-      .toBe("");
+    const panel = page.getByRole("form", { name: `Remote login at ${new URL(backendUrl).origin}` });
+    const username = panel.getByRole("textbox", { name: "Username or email" });
+    const password = panel.getByLabel("Password", { exact: true });
+    const address = page.getByRole("textbox", { name: "Browser address" });
     const remote = (await service.cloudTarget(attachedBrowserId)).page;
-    expect(await remote.locator('[name="username"]').inputValue()).toBe("test-local-user");
-    expect(await remote.locator('[name="password"]').inputValue()).toBe("test-local-password");
-    expect(
-      await remote.evaluate(() => (window as unknown as { submitted?: boolean }).submitted),
-    ).toBeUndefined();
-    expect(controls.join("\n")).not.toContain("test-local-password");
+    expect(await address.inputValue()).toBe(new URL(backendUrl).origin);
+    const visibleOrigin = page.locator(".cloud-browser__location--origin span");
+    expect(await visibleOrigin.innerText()).toBe(new URL(backendUrl).origin);
+    expect(await visibleOrigin.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    expect(await panel.textContent()).not.toContain(new URL(backendUrl).origin);
+    expect(await panel.getByRole("button").count()).toBe(0);
+    const userBounds = (await username.boundingBox())!;
+    const passBounds = (await password.boundingBox())!;
+    expect(userBounds.width).toBe(passBounds.width);
+    expect(userBounds.height).toBe(passBounds.height);
+    expect(userBounds.x).toBe(passBounds.x);
+    expect(userBounds.x + userBounds.width).toBeLessThanOrEqual(390);
+    await username.pressSequentially("test-local-user");
+    await username.press("Tab");
+    expect(await password.evaluate((el) => el === document.activeElement)).toBe(true);
+    // Simulate a password manager updating both DOM inputs without input events.
+    await panel.evaluate((form) => {
+      form.querySelector<HTMLInputElement>('[name="username"]')!.value = "test-manager-user";
+      form.querySelector<HTMLInputElement>('[name="password"]')!.value = "test-local-password";
+    });
+    await page.getByRole("status", { name: "Filling remote login" }).waitFor();
+    const signIn = (await remote.getByRole("button", { name: "Sign in" }).boundingBox())!;
+    const state = await service.cloudState(attachedBrowserId);
+    const canvas = (await page.locator(".cloud-browser__image").boundingBox())!;
+    const x = signIn.x + signIn.width / 2;
+    const y = signIn.y + signIn.height / 2;
+    await page.mouse.click(
+      canvas.x + (x * canvas.width) / state.width,
+      canvas.y + (y * canvas.height) / state.height,
+    );
+    await tapRemote(page, x, y);
+    expect(await remote.locator('[name="password"]').inputValue()).toBe("");
+    expect(await remote.locator("body").getAttribute("data-submitted")).toBeNull();
+    expect(controls.map((command) => JSON.parse(command).action)).not.toContain("click");
+    releasePrepare();
+    await expect
+      .poll(() => remote.locator('[name="password"]').inputValue())
+      .toBe("test-local-password");
+    expect(await remote.locator('[name="username"]').inputValue()).toBe("test-manager-user");
+    expect(await password.inputValue()).toBe("test-local-password");
+    await page.setViewportSize({ width: 390, height: 430 });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.evaluate(() => navigator.clipboard.writeText("test-corrected-password"));
+    await password.press("ControlOrMeta+a");
+    await password.press("ControlOrMeta+v");
+    const retry = panel.getByRole("button", { name: "Retry" });
+    await retry.waitFor();
+    expect(await password.inputValue()).toBe("test-corrected-password");
+    await retry.press("Enter");
+    await expect
+      .poll(() => remote.locator('[name="password"]').inputValue(), { timeout: 10_000 })
+      .toBe("test-corrected-password");
+    const keyboardBounds = (await password.boundingBox())!;
+    expect(keyboardBounds.y + keyboardBounds.height).toBeLessThanOrEqual(430);
+    await password.press("Enter");
+    expect(await remote.locator("body").getAttribute("data-submitted")).toBeNull();
+    expect(controls.join("\n")).not.toMatch(/test-(?:local|corrected)-password/);
+    const readyState = await fittedViewerFrame(page);
+    const readyCanvas = (await page.locator(".cloud-browser__image").boundingBox())!;
+    const readySignIn = (await remote.getByRole("button", { name: "Sign in" }).boundingBox())!;
+    await page.mouse.click(
+      readyCanvas.x +
+        ((readySignIn.x + readySignIn.width / 2) * readyCanvas.width) / readyState.width,
+      readyCanvas.y +
+        ((readySignIn.y + readySignIn.height / 2) * readyCanvas.height) / readyState.height,
+    );
+    await expect
+      .poll(() => controls.map((command) => JSON.parse(command).action))
+      .toContain("click");
+    await expect.poll(() => remote.locator("body").getAttribute("data-submitted")).toBe("yes");
     await page.locator('.browser-credentials [name="password"]').fill("discard-on-step-change");
     await remote.setContent(
       '<form action="/ax/claim"><input type="email" name="email"><button>Continue</button></form>',
@@ -304,7 +386,6 @@ test("autofill detects login steps without submitting or exposing values to cont
       .poll(() => page.locator('.browser-credentials [name="password"]').getAttribute("required"))
       .toBeNull();
     await page.locator('.browser-credentials [name="username"]').fill("multistep-user");
-    await page.getByRole("button", { name: "Fill", exact: true }).click();
     await expect.poll(() => remote.locator('[name="email"]').inputValue()).toBe("multistep-user");
     await remote.setContent(
       '<form><input type="password" autocomplete="current-password"><button>Sign in</button></form>',
@@ -319,7 +400,6 @@ test("autofill detects login steps without submitting or exposing values to cont
       .poll(() => page.locator('.browser-credentials [name="password"]').getAttribute("required"))
       .not.toBeNull();
     await page.locator('.browser-credentials [name="password"]').fill("multistep-password");
-    await page.getByRole("button", { name: "Fill", exact: true }).click();
     await expect.poll(() => remote.locator("input").inputValue()).toBe("multistep-password");
     await remote.setContent('<form><input type="email"><button>Subscribe</button></form>');
     await page.locator(".browser-credentials").waitFor({ state: "detached", timeout: 10_000 });

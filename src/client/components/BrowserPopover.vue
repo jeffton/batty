@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BasePopover from "@/client/components/BasePopover.vue";
 import { ArrowLeft, RotateCw, SquareStack, Check, Plus, X } from "@lucide/vue";
@@ -11,6 +11,7 @@ const props = defineProps<{ popoverId: string; browserId: string; title: string 
 const viewport = ref<HTMLElement>();
 const address = ref("");
 const credentialsVisible = ref(false);
+const credentials = ref<InstanceType<typeof BrowserCredentials>>();
 const tabs = ref<InstanceType<typeof BasePopover>>();
 function selectTab(pageId: string): void {
   tabs.value?.hidePopover();
@@ -65,6 +66,9 @@ const {
   onOnline,
   onOffline,
 } = browser;
+const loginOrigin = computed(() =>
+  credentialsVisible.value && state.value?.login ? new URL(state.value.url).origin : undefined,
+);
 const { image, displayedFrame } = browser.frames;
 const {
   editor,
@@ -81,6 +85,14 @@ const {
   submitInput,
   dismissInput,
 } = browser.input;
+
+function startPageGesture(event: PointerEvent): void {
+  if (!credentials.value || credentials.value.canInteractWithPage()) pointerDown(event);
+}
+function finishPageGesture(event: PointerEvent): void {
+  if (!credentials.value || credentials.value.canInteractWithPage()) pointerUp(event);
+  else cancelGesture();
+}
 
 function resizeView(): void {
   const visual = window.visualViewport;
@@ -135,7 +147,12 @@ const addressFocused = ref(false);
 function focusAddress(event: Event): void {
   addressFocused.value = true;
   tabs.value?.hidePopover();
-  selectAddress(event);
+  if (loginOrigin.value) {
+    address.value = state.value!.url;
+    void nextTick(() => {
+      if (addressFocused.value) addressInput.value?.select();
+    });
+  } else selectAddress(event);
 }
 function selectAddress(event: Event): void {
   (event.currentTarget as HTMLInputElement).select();
@@ -183,7 +200,10 @@ onBeforeUnmount(() => {
     <template #heading>
       <form
         class="cloud-browser__address"
-        :class="{ 'cloud-browser__address--focused': addressFocused }"
+        :class="{
+          'cloud-browser__address--focused': addressFocused,
+          'cloud-browser__address--login': loginOrigin,
+        }"
         @submit.prevent="navigate"
       >
         <button
@@ -251,22 +271,29 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </BasePopover>
-        <input
-          ref="addressInput"
-          v-model="address"
-          aria-label="Browser address"
-          @focus="focusAddress"
-          @blur="addressFocused = false"
-          @pointerdown="addressPointerDown"
-          @click="!addressWasFocused && selectAddress($event)"
-          type="text"
-          inputmode="url"
-          enterkeyhint="go"
-          autocapitalize="none"
-          autocorrect="off"
-          :spellcheck="false"
-          placeholder="Address"
-        />
+        <div
+          class="cloud-browser__location"
+          :class="{ 'cloud-browser__location--origin': loginOrigin && !addressFocused }"
+        >
+          <span v-if="loginOrigin && !addressFocused" aria-hidden="true">{{ loginOrigin }}</span>
+          <input
+            ref="addressInput"
+            :value="!addressFocused && loginOrigin ? loginOrigin : address"
+            aria-label="Browser address"
+            @input="address = ($event.target as HTMLInputElement).value"
+            @focus="focusAddress"
+            @blur="addressFocused = false"
+            @pointerdown="addressPointerDown"
+            @click="!addressWasFocused && selectAddress($event)"
+            type="text"
+            inputmode="url"
+            enterkeyhint="go"
+            autocapitalize="none"
+            autocorrect="off"
+            :spellcheck="false"
+            placeholder="Address"
+          />
+        </div>
       </form>
     </template>
     <div class="cloud-browser">
@@ -289,19 +316,25 @@ onBeforeUnmount(() => {
           :data-revision="displayedFrame?.revision"
           role="img"
           aria-label="Live browser page. Tap to click; swipe to scroll."
-          @pointerdown.prevent="pointerDown"
+          @pointerdown.prevent="startPageGesture"
           @pointermove.prevent="pointerMove"
-          @pointerup.prevent="pointerUp"
+          @pointerup.prevent="finishPageGesture"
           @pointercancel="cancelGesture"
           @lostpointercapture="cancelGesture"
           @wheel.prevent="wheel"
           @contextmenu.prevent
         />
         <div
-          v-if="reconnecting || (!frameReady && !ended && !error)"
+          v-if="reconnecting || (!frameReady && !ended && !error) || credentials?.transferring"
           class="cloud-browser__connection"
           role="status"
-          :aria-label="reconnecting ? 'Reconnecting browser' : 'Connecting browser'"
+          :aria-label="
+            reconnecting
+              ? 'Reconnecting browser'
+              : credentials?.transferring
+                ? 'Filling remote login'
+                : 'Connecting browser'
+          "
         >
           <span class="cloud-browser__spinner" aria-hidden="true" />
         </div>
@@ -309,6 +342,7 @@ onBeforeUnmount(() => {
       </div>
       <BrowserCredentials
         v-if="credentialsVisible && state?.login"
+        ref="credentials"
         :key="`${browserId}:${state.pageId}:${state.revision}:${state.url}:${state.login.id}`"
         :browser-id="browserId"
         :state="state"
@@ -459,11 +493,47 @@ onBeforeUnmount(() => {
 .cloud-browser__address--focused > button {
   display: none;
 }
+@media (max-width: 480px) {
+  .cloud-browser__address--login:not(.cloud-browser__address--focused) {
+    display: grid;
+    grid-template-columns: repeat(3, max-content) minmax(0, 1fr);
+  }
+  .cloud-browser__address--login:not(.cloud-browser__address--focused) .cloud-browser__location {
+    grid-column: 1 / -1;
+  }
+  .browser-popover:has(.cloud-browser__address--login) :deep(.full-popover__header-actions) {
+    align-self: start;
+  }
+}
 .cloud-browser__address input {
   height: var(--button-size);
   min-height: var(--button-size);
 }
-.cloud-browser__address input,
+.cloud-browser__location {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+.cloud-browser__location input {
+  box-sizing: border-box;
+  width: 100%;
+}
+.cloud-browser__location--origin span {
+  display: block;
+  min-height: var(--button-size);
+  padding: 0.35rem 0.5rem;
+  align-content: center;
+  border: 1px solid var(--color-chrome-border);
+  border-radius: var(--chrome-control-radius);
+  background: var(--color-bg-panel-strong);
+  overflow-wrap: anywhere;
+}
+.cloud-browser__location--origin input {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  opacity: 0;
+}
 .cloud-browser__editor input,
 .cloud-browser__editor textarea {
   flex: 1;

@@ -1,3 +1,13 @@
+# Pi dependency review — 2026-11-20
+
+All eight pinned Pi/Chord packages move from **1.5.2 to 1.6.0**, the current npm stable release. [Pi 1.6.0](https://github.com/earendil-works/pi/releases/tag/v1.6.0) places the system prompt in the first `developer` input item for Codex OAuth instead of top-level `instructions` ([upstream fix](https://github.com/earendil-works/pi/pull/12319)). User/history roles and session cache keys are unchanged. Existing sessions can see a cold cache because the serialized prefix changed; the new stable prefix is cacheable across turns. Batty's explicitly selected models and prompt assembly are unchanged. GPT-6.2 supports neither `none` nor `minimal` reasoning, and OpenAI may drop replayed reasoning after an earlier prefix changes (for example on compaction), without changing persisted messages.
+
+[Durable 1.6](https://github.com/earendil-works/pi/blob/v1.6.0/packages/durable/CHANGELOG.md) migrates `pi.generation` to version 3 and `pi.tool` to version 4 on recovery. There is no SQLite schema change and Batty's task identities, OptChat entries, cron and worker records need no rewrite. A 1.5 runtime must not open data written by 1.6; use a verified SQLite online backup for disaster rollback, not a binary-only downgrade. Rollback from a backup discards later commits. The existing install-time context-projection and recent-work retention patch is rebased because neither behavior is upstream.
+
+The Codemode adapters preserve nested receipts and result envelopes while supporting the new nonblocking nested-call handle. Existing synthetic adapters cannot park their intercepted tool calls. Batty does not use the changed Chord worker/telemetry APIs, Coding Agent terminal rendering or removed Durable namespace options. Agent Core records aborted tool calls; MCP adds a server-summary helper; Codemode and Schema have no separate 1.6 changes. The aligned dependency set also includes the upstream Undici security update.
+
+Browser dependencies are unchanged: Patchright 1.64.3 is stable and pinned to upstream Playwright 1.64.1’s Chromium revision; Playwright Core 1.65.1 is independently newer, not the matching driver. Production Linux uses [Chrome Stable 158.0.8127.36](https://chromereleases.googleblog.com/2026/11/stable-channel-update-for-desktop_01699533288.html).
+
 # Dependency review — 2026-11-16
 
 Checked all direct dependencies, devDependencies, catalogs, overrides and pnpm against npm at 09:00 UTC. Selection uses the 1,440-minute release age and existing exclusions. Registry evidence is recorded in `/var/tmp/batty-dependency-registry-20261116.json`.

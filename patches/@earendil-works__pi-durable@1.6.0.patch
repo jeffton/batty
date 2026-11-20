@@ -30,7 +30,7 @@ index 54f3ef3..eb3c02e 100644
              continue;
          cut = candidates.find((candidate) => candidate >= index) ?? candidates.at(-1);
 diff --git a/dist/harness/generation.js b/dist/harness/generation.js
-index 27e60bb..bb2d4c1 100644
+index 56f3055..5dece29 100644
 --- a/dist/harness/generation.js
 +++ b/dist/harness/generation.js
 @@ -63,7 +63,12 @@ export const GenerationTask = defineTask({
@@ -48,10 +48,10 @@ index 27e60bb..bb2d4c1 100644
              // nothing it answers. Otherwise, as for a continue after an answer or in an empty conversation, end the run
              // before any request.
 diff --git a/dist/harness/types.d.ts b/dist/harness/types.d.ts
-index 7f4a0ba..56f9e0c 100644
+index 7ba2571..338e146 100644
 --- a/dist/harness/types.d.ts
 +++ b/dist/harness/types.d.ts
-@@ -905,6 +905,14 @@ export interface HookApi extends DocumentReader {
+@@ -1007,6 +1007,14 @@ export interface HookApi extends DocumentReader {
  export type HookResult<T> = T | undefined | Promise<T | undefined>;
  /** Hooks of the built-in generation task. */
  export interface GenerationHooks {
@@ -66,7 +66,7 @@ index 7f4a0ba..56f9e0c 100644
      /** Before every request attempt, including recovery; the result is used for that request only. */
      beforeRequest(request: {
          readonly messages: readonly Message[];
-@@ -990,6 +998,14 @@ export interface ToolHooks {
+@@ -1125,6 +1133,14 @@ export interface ToolHooks {
  }
  /** Hooks of the built-in compaction task. */
  export interface CompactionHooks {

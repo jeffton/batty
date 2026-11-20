@@ -493,12 +493,12 @@ for (const mode of ["generation", "tool"] as const) {
           },
         ]);
         expect(await harness.getTask(12 as TaskId, context)).toMatchObject({
-          version: 3,
+          version: 4,
           state: { status: "terminal", outcome: { status: "completed" } },
         });
       }
       expect(await harness.getTask(9 as TaskId, context)).toMatchObject({
-        version: 2,
+        version: 3,
         state: { status: "terminal", outcome: { status: "completed" } },
       });
       expect((await harness.snapshot(LiveDoc, root.id, context))?.run).toBeUndefined();

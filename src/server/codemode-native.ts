@@ -5,6 +5,9 @@ import {
   defineTool,
   AgentDoc,
   type Harness,
+  type JsonObject,
+  type NestedToolCall,
+  type NestedToolExecutionResult,
   type Cursor,
   type ToolExecutionApi,
   type ToolExecutionResult,
@@ -62,49 +65,88 @@ export function createCodemodeAdapters(
         let output = "";
         const diagnostics: import("@earendil-works/pi-durable").ToolDiagnostic[] = [];
         let details: JsonValue | undefined;
+        function executeTool(
+          name: string,
+          args: JsonObject,
+          context: Context,
+          options?: { key?: string; progress?: boolean; wait?: true },
+        ): Promise<NestedToolExecutionResult>;
+        function executeTool(
+          name: string,
+          args: JsonObject,
+          context: Context,
+          options: { key?: string; progress?: boolean; wait: false },
+        ): Promise<NestedToolCall>;
+        async function executeTool(
+          name: string,
+          args: JsonObject,
+          context: Context,
+          options?: { key?: string; progress?: boolean; wait?: boolean },
+        ) {
+          // A nested tool cannot detach subsequent dispatches from its owning
+          // adapter by supplying a context without the task's abort signal.
+          const signals = [ctx.abortSignal, context.abortSignal].filter(
+            (signal): signal is AbortSignal => signal !== undefined,
+          );
+          const signal = AbortSignal.any(signals);
+          signal.throwIfAborted();
+          context = withAbortSignal(signal, context);
+          const target = (await resolve(api, context)).find((tool) => tool.name === name);
+          signal.throwIfAborted();
+          if (!target) throw new Error(`Unknown nested tool: ${name}`);
+          const adapter = codemodeAdapterName(target.replay ?? "unsafe");
+          function unwrap(nested: NestedToolExecutionResult): NestedToolExecutionResult {
+            if (nested.isError || nested.structuredOutput === undefined) return nested;
+            const { result, structured } = nested.structuredOutput as unknown as CodemodeResult;
+            const output = result.output ?? [];
+            return {
+              taskId: nested.taskId,
+              structuredOutput:
+                result.structuredOutput ??
+                structured ??
+                ((output.length === 0
+                  ? ""
+                  : output.length === 1
+                    ? output[0]!.type === "text"
+                      ? output[0]!.text
+                      : output[0]!
+                    : output) as JsonValue),
+              isError: result.isError ?? false,
+              diagnostics: result.diagnostics ?? [],
+              ...(result.details === undefined ? {} : { details: result.details }),
+              ...(result.usage === undefined ? {} : { usage: result.usage }),
+            };
+          }
+          if (options?.wait === false) {
+            const call = await api.executeTool(adapter, { name, args }, context, {
+              ...options,
+              wait: false,
+            });
+            return {
+              taskId: call.taskId,
+              result: async (context: Context) =>
+                unwrap(
+                  await call.result(
+                    withAbortSignal(
+                      AbortSignal.any([
+                        signal,
+                        ...(context.abortSignal ? [context.abortSignal] : []),
+                      ]),
+                      context,
+                    ),
+                  ),
+                ),
+            };
+          }
+          return unwrap(
+            await api.executeTool(adapter, { name, args }, context, { ...options, wait: true }),
+          );
+        }
         const result = await tool.execute(
           args,
           {
             ...api,
-            executeTool: async (name, args, context, options) => {
-              // A nested tool cannot detach subsequent dispatches from its owning
-              // adapter by supplying a context without the task's abort signal.
-              const signals = [ctx.abortSignal, context.abortSignal].filter(
-                (signal): signal is AbortSignal => signal !== undefined,
-              );
-              const signal = AbortSignal.any(signals);
-              signal.throwIfAborted();
-              context = withAbortSignal(signal, context);
-              const target = (await resolve(api, context)).find((tool) => tool.name === name);
-              signal.throwIfAborted();
-              if (!target) throw new Error(`Unknown nested tool: ${name}`);
-              const nested = await api.executeTool(
-                codemodeAdapterName(target.replay ?? "unsafe"),
-                { name, args },
-                context,
-                options,
-              );
-              if (nested.isError || nested.structuredOutput === undefined) return nested;
-              const { result, structured } = nested.structuredOutput as unknown as CodemodeResult;
-              const output = result.output ?? [];
-              return {
-                taskId: nested.taskId,
-                structuredOutput:
-                  result.structuredOutput ??
-                  structured ??
-                  ((output.length === 0
-                    ? ""
-                    : output.length === 1
-                      ? output[0]!.type === "text"
-                        ? output[0]!.text
-                        : output[0]!
-                      : output) as JsonValue),
-                isError: result.isError ?? false,
-                diagnostics: result.diagnostics ?? [],
-                ...(result.details === undefined ? {} : { details: result.details }),
-                ...(result.usage === undefined ? {} : { usage: result.usage }),
-              };
-            },
+            executeTool,
             outputWindow: undefined,
             output: (chunk) => {
               output += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
@@ -120,6 +162,8 @@ export function createCodemodeAdapters(
           },
           ctx,
         );
+        if (result.sleep !== undefined || result.wait !== undefined)
+          throw new Error(`Nested tool ${name} cannot park inside a codemode adapter`);
         if (
           tool.structuredOutputSchema &&
           !(result.isError && result.structuredOutput === undefined)

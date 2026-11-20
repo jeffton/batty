@@ -4,11 +4,14 @@ import {
   defineDoc,
   defineTask,
   type ToolExecutionApi,
+  type NestedToolCall,
+  type NestedToolExecutionResult,
   type ToolExecutionResult,
   type ToolRegistration,
   type TaskRuntime,
   type RunningTask,
   type TaskId,
+  type JsonObject,
   type ToolDiagnostic,
 } from "@earendil-works/pi-durable";
 import { withAbortSignal } from "@earendil-works/chord/context";
@@ -52,59 +55,52 @@ export function createCodemodeTasks(
     admissions: Promise<TaskId<Result>>[],
   ): Promise<ToolExecutionApi> {
     let sequence = 0;
-    return {
-      now: runtime.now.bind(runtime),
-      taskId: runtime.taskId,
-      conversationId: runtime.conversationId,
-      callId,
-      registry: runtime.registry,
-      models: runtime.models,
-      env: await runtime.env(ctx),
-      agent: runtime.agent.bind(runtime),
-      snapshot: runtime.snapshot.bind(runtime),
-      snapshotAsOf: runtime.snapshotAsOf.bind(runtime),
-      watchDoc: runtime.watchDoc.bind(runtime),
-      memo: runtime.memo.bind(runtime),
-      getTask: runtime.getTask.bind(runtime),
-      waitForTask: runtime.waitForTask.bind(runtime),
-      conversation: runtime.conversation.bind(runtime),
-      output: (chunk) => {
-        reported.output += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-      },
-      // Nested calls retain their returned output, not a running-output tail.
-      outputWindow: undefined,
-      retainedOutput: () => ({ text: reported.output, truncated: false }),
-      diagnostic: (diagnostic) => {
-        reported.diagnostics.push(diagnostic);
-      },
-      executeTool: async (name, args, context, options = {}) => {
-        const key = options.key ?? String(++sequence);
-        const admission = (async () => {
-          let taskId!: TaskId<Result>;
-          await runtime.commit(async (tx) => {
-            const calls = await tx.doc(NestedCalls, runtime.taskId);
-            const recorded = calls.calls[key];
-            if (recorded) {
-              if (recorded.name !== name || JSON.stringify(recorded.args) !== JSON.stringify(args))
-                throw new Error(`Nested call ${key} changed during replay`);
-              taskId = recorded.taskId as TaskId<Result>;
-              return;
-            }
-            const id = await tx.createTask(
-              nested,
-              { name, args: args as JsonValue, callId: `${callId}/${key}` },
-              {
-                ownership: { kind: "task", taskId: runtime.taskId },
-                abandonOnRestart: reported.replay === "unsafe",
-              },
-            );
-            calls.calls[key] = { taskId: id, name, args: args as JsonValue };
-            taskId = id;
-          }, context);
-          return taskId;
-        })();
-        admissions.push(admission);
-        const taskId = await admission;
+    function executeTool(
+      name: string,
+      args: JsonObject,
+      context: Context,
+      options?: { key?: string; progress?: boolean; wait?: true },
+    ): Promise<NestedToolExecutionResult>;
+    function executeTool(
+      name: string,
+      args: JsonObject,
+      context: Context,
+      options: { key?: string; progress?: boolean; wait: false },
+    ): Promise<NestedToolCall>;
+    async function executeTool(
+      name: string,
+      args: JsonObject,
+      context: Context,
+      options: { key?: string; progress?: boolean; wait?: boolean } = {},
+    ) {
+      const key = options.key ?? String(++sequence);
+      const admission = (async () => {
+        let taskId!: TaskId<Result>;
+        await runtime.commit(async (tx) => {
+          const calls = await tx.doc(NestedCalls, runtime.taskId);
+          const recorded = calls.calls[key];
+          if (recorded) {
+            if (recorded.name !== name || JSON.stringify(recorded.args) !== JSON.stringify(args))
+              throw new Error(`Nested call ${key} changed during replay`);
+            taskId = recorded.taskId as TaskId<Result>;
+            return;
+          }
+          const id = await tx.createTask(
+            nested,
+            { name, args: args as JsonValue, callId: `${callId}/${key}` },
+            {
+              ownership: { kind: "task", taskId: runtime.taskId },
+              abandonOnRestart: reported.replay === "unsafe",
+            },
+          );
+          calls.calls[key] = { taskId: id, name, args: args as JsonValue };
+          taskId = id;
+        }, context);
+        return taskId;
+      })();
+      admissions.push(admission);
+      const taskId = await admission;
+      async function result(context: Context): Promise<NestedToolExecutionResult> {
         const settled = await runtime.waitForTask(taskId, context);
         const outcome = settled.state.outcome;
         if (outcome.status !== "completed")
@@ -132,7 +128,38 @@ export function createCodemodeTasks(
           ...(result.details === undefined ? {} : { details: result.details }),
           ...(result.usage === undefined ? {} : { usage: result.usage }),
         };
+      }
+      return options.wait === false ? { taskId: taskId as TaskId, result } : result(context);
+    }
+    return {
+      now: runtime.now.bind(runtime),
+      taskId: runtime.taskId,
+      conversationId: runtime.conversationId,
+      callId,
+      wake: undefined,
+      checkpoint: undefined,
+      registry: runtime.registry,
+      models: runtime.models,
+      env: await runtime.env(ctx),
+      agent: runtime.agent.bind(runtime),
+      snapshot: runtime.snapshot.bind(runtime),
+      snapshotAsOf: runtime.snapshotAsOf.bind(runtime),
+      watchDoc: runtime.watchDoc.bind(runtime),
+      memo: runtime.memo.bind(runtime),
+      readSignal: runtime.readSignal.bind(runtime),
+      getTask: runtime.getTask.bind(runtime),
+      waitForTask: runtime.waitForTask.bind(runtime),
+      conversation: runtime.conversation.bind(runtime),
+      output: (chunk) => {
+        reported.output += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
       },
+      // Nested calls retain their returned output, not a running-output tail.
+      outputWindow: undefined,
+      retainedOutput: () => ({ text: reported.output, truncated: false }),
+      diagnostic: (diagnostic) => {
+        reported.diagnostics.push(diagnostic);
+      },
+      executeTool,
       details: async (details, context) => {
         await runtime.commit(async (tx) => {
           (await tx.doc(NestedDetails, runtime.taskId)).details = JSON.parse(
@@ -216,7 +243,7 @@ export function createCodemodeTasks(
       throw new Error(
         `Invalid arguments for ${tool.name}: ${JSON.stringify([...argumentValidator.Errors(task.input.args)])}`,
       );
-    let result: ToolExecutionResult;
+    let result: Awaited<ReturnType<ToolRegistration["execute"]>>;
     try {
       result = await tool.execute(
         task.input.args as never,
@@ -230,6 +257,8 @@ export function createCodemodeTasks(
         await abortChildren(runtime, ctx);
       }
     }
+    if (result.sleep !== undefined || result.wait !== undefined)
+      throw new Error(`Nested tool ${tool.name} cannot park inside a legacy codemode task`);
     if (tool.structuredOutputSchema && !(result.isError && result.structuredOutput === undefined)) {
       const validator = Compile(tool.structuredOutputSchema);
       if (!validator.Check(result.structuredOutput))

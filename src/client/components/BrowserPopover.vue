@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BasePopover from "@/client/components/BasePopover.vue";
 import { ArrowLeft, RotateCw, SquareStack, Check, Plus, X } from "@lucide/vue";
@@ -123,7 +123,8 @@ async function resizeViewport(): Promise<void> {
   // Keep keyboard-only height changes stable, but still fit rotation/device changes.
   if (
     (editing.value ||
-      credentials.value?.isEditing() ||
+      (credentials.value &&
+        (credentials.value.isEditing() || !credentials.value.canInteractWithPage())) ||
       document.activeElement?.tagName === "INPUT") &&
     state.value?.width === width &&
     state.value.mobile === mobile &&
@@ -138,6 +139,13 @@ async function resizeViewport(): Promise<void> {
   )
     await control({ action: "viewport", width, height, mobile, deviceScaleFactor });
 }
+// Focusing an input can defer a height fit without changing layout again on blur.
+watch(
+  () => credentials.value?.transferring,
+  (transferring, previous) => {
+    if (!transferring && previous) scheduleResize();
+  },
+);
 function scheduleResize(): void {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => void fitViewport(), 120);
@@ -202,6 +210,7 @@ onBeforeUnmount(() => {
     <template #heading>
       <form
         class="cloud-browser__address"
+        @focusout="scheduleResize"
         :class="{ 'cloud-browser__address--focused': addressFocused }"
         @submit.prevent="navigate"
       >
@@ -289,7 +298,7 @@ onBeforeUnmount(() => {
         />
       </form>
     </template>
-    <div class="cloud-browser">
+    <div class="cloud-browser" @focusout="scheduleResize">
       <div v-if="error" class="cloud-browser__error" role="alert">
         {{ error }}
         <button v-if="!ended" type="button" class="chrome-button" @click="startViewing">

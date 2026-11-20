@@ -164,7 +164,9 @@ function canInteractWithPage(): boolean {
   return !inFlight && !composing && (complete(value) ? equal(filled, value) : !transferAttempted);
 }
 function isEditing(): boolean {
-  return transferring.value || !!form.value?.contains(document.activeElement);
+  const value = values();
+  const unsent = (value.username || value.password) && !equal(filled, value);
+  return !!unsent || transferring.value || !!form.value?.contains(document.activeElement);
 }
 defineExpose({ canInteractWithPage, isEditing, transferring });
 

@@ -377,8 +377,40 @@ test("autofill detects login steps without submitting or exposing values to cont
     await password.press("Enter");
     expect(await remote.locator("body").getAttribute("data-submitted")).toBeNull();
     expect(controls.join("\n")).not.toMatch(/test-(?:local|corrected)-password/);
+    const { revision: compactRevision } = await fittedViewerFrame(page);
+    await username.fill("test-manager-user");
+    await page.clock.install();
     await page.setViewportSize({ width: 390, height: 844 });
+    await username.blur();
+    await page.clock.runFor(350);
+    expect((await service.cloudState(attachedBrowserId)).revision).toBe(compactRevision);
+    expect(await username.inputValue()).toBe("test-manager-user");
+    await password.fill("test-corrected-password");
+    await page.clock.runFor(350);
+    await page.getByRole("status", { name: "Filling remote login" }).waitFor({ state: "hidden" });
+    const gap = () =>
+      page.locator(".cloud-browser__image").evaluate((canvas) => {
+        const panel = canvas.closest(".cloud-browser")!.querySelector(".browser-credentials")!;
+        return panel.getBoundingClientRect().top - canvas.getBoundingClientRect().bottom;
+      });
+    expect(await gap()).toBeGreaterThan(50);
+    await password.fill("");
+    await password.blur();
+    await page.clock.runFor(350);
+    expect((await service.cloudState(attachedBrowserId)).revision).toBe(compactRevision);
+    expect(await gap()).toBeGreaterThan(50);
+    const compactSignIn = (await remote.getByRole("button", { name: "Sign in" }).boundingBox())!;
+    await tapRemote(
+      page,
+      compactSignIn.x + compactSignIn.width / 2,
+      compactSignIn.y + compactSignIn.height / 2,
+    );
+    expect(await remote.locator("body").getAttribute("data-submitted")).toBeNull();
+    await password.fill("test-corrected-password");
+    await password.blur();
+    await page.clock.runFor(350);
     const readyState = await fittedViewerFrame(page);
+    expect(Math.abs(await gap())).toBeLessThanOrEqual(2);
     const readyCanvas = (await page.locator(".cloud-browser__image").boundingBox())!;
     const readySignIn = (await remote.getByRole("button", { name: "Sign in" }).boundingBox())!;
     await page.mouse.click(

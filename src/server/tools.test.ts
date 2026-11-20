@@ -188,6 +188,54 @@ describe("durable tool bridge", () => {
   });
 
   it.each(["search", "content"] as const)(
+    "retains in-body headings that match part of the page title in codemode %s results",
+    async (action) => {
+      const { config, run } = await fixture();
+      config.braveSearchKey = "test-key";
+      const url = "https://example.com/newsletter";
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      cleanups.push(async () => fetchMock.mockRestore());
+      if (action === "search") {
+        fetchMock.mockResolvedValueOnce(
+          Response.json({ web: { results: [{ title: "Newsletter", url }] } }),
+        );
+      }
+      const paragraph = "The newsletter covers several different topics in independent sections. ";
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          `<!doctype html><title>Weather, Coastal Flooding and Local News</title>
+           <nav><h2>Navigation heading</h2><a href="/archive">Archive</a></nav>
+           <table role="presentation"><tr><td>
+             <h1>Tomorrow's Weather Forecast</h1><p>${paragraph.repeat(8)}</p>
+             <h1>Coastal Flooding</h1><p>${paragraph.repeat(8)}</p>
+             <h2>Local News</h2><p>${paragraph.repeat(8)}Ending marker.</p>
+           </td></tr></table>`,
+          { headers: { "content-type": "text/html" } },
+        ),
+      );
+      const params =
+        action === "search"
+          ? { action, query: "newsletter", includeContent: true }
+          : { action, url };
+      const result = await run(`
+        const data = await tools.web_search(${JSON.stringify(params)});
+        return data.action === "search" ? data.results[0].content : data.content;
+      `);
+      expect(result.isError).toBe(false);
+      const content = result.content[0].text;
+      expect(content.match(/^#{1,2} .+$/gm)).toEqual([
+        "# Weather, Coastal Flooding and Local News",
+        "## Tomorrow's Weather Forecast",
+        "## Coastal Flooding",
+        "## Local News",
+      ]);
+      expect(content).toMatch(/Ending marker\.$/);
+      expect(content).not.toContain("Navigation heading");
+      expect(content).not.toContain("Archive");
+    },
+  );
+
+  it.each(["search", "content"] as const)(
     "preserves full %s page data through codemode while spilling model-facing text",
     async (action) => {
       const { config, run } = await fixture();

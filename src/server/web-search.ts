@@ -142,13 +142,38 @@ function htmlToMarkdown(html: string): string {
     .trim();
 }
 
+class ArticleReadability extends Readability<HTMLElement> {
+  // Readability 0.6 removes the first fuzzy title match anywhere in the body.
+  // Keep those headings and deduplicate only a leading exact match below.
+  _headerDuplicatesTitle(): boolean {
+    return false;
+  }
+}
+
+function normalizeHeading(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function removeLeadingTitle(content: HTMLElement, title: string): void {
+  const heading = content.querySelector("h1, h2");
+  if (!heading || normalizeHeading(heading.textContent) !== normalizeHeading(title)) return;
+
+  const beforeHeading = content.ownerDocument.createRange();
+  beforeHeading.selectNodeContents(content);
+  beforeHeading.setEndBefore(heading);
+  if (!beforeHeading.toString().trim()) heading.remove();
+}
+
 function extractReadableContent(html: string, url: string): string {
   const dom = new JSDOM(html, { url });
-  const article = new Readability(dom.window.document).parse();
+  const article = new ArticleReadability(dom.window.document, {
+    serializer: (node) => node as HTMLElement,
+  }).parse();
 
   if (article?.content) {
+    if (article.title) removeLeadingTitle(article.content, article.title);
     const title = article.title ? `# ${article.title}\n\n` : "";
-    return `${title}${htmlToMarkdown(article.content)}`.trim();
+    return `${title}${htmlToMarkdown(article.content.innerHTML)}`.trim();
   }
 
   const fallbackDoc = new JSDOM(html, { url });

@@ -12,9 +12,9 @@ test("web content extracts HTML articles without loading scripts or resources", 
   const server = createServer((request, response) => {
     requests.push(request.url!);
     response.writeHead(200, { "Content-Type": "text/html" });
-    response.end(`<!doctype html><html><head><title>Maintenance article</title>
+    response.end(`<!doctype html><html><head><title>2026. Maintenance article</title>
       <script src="/external.js"></script><link rel="stylesheet" href="/external.css">
-      </head><body><nav>Navigation noise</nav><article><h1>Maintenance article</h1>
+      </head><body><nav>Navigation noise</nav><article><h1>2026. <em>Maintenance</em> article</h1>
       <p>${paragraph}</p><p>Read the <a href="/guide">maintenance guide</a>.</p>
       <pre><code>pnpm check</code></pre>
       <table><thead><tr><th>Package</th><th>Result</th></tr></thead>
@@ -30,7 +30,7 @@ test("web content extracts HTML articles without loading scripts or resources", 
       apiKey: "unused-local-fixture",
       url: `${base}/article`,
     });
-    expect(result.details.content).toContain("# Maintenance article");
+    expect(result.details.content).toMatch(/^# 2026\. Maintenance article\n\nA dependency/);
     expect(result.details.content).toContain(paragraph.trim());
     expect(result.details.content).toContain(`[maintenance guide](${base}/guide)`);
     expect(result.details.content).toContain("```\npnpm check\n```");

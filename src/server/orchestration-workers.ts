@@ -36,7 +36,7 @@ import {
 } from "./runtime-notices.js";
 
 import { reportWithAttachments } from "./attachment-contract.js";
-import { reportWithArtifacts } from "./artifact-forwarding.js";
+import { mergeResponseArtifacts, reportWithArtifacts } from "./artifact-forwarding.js";
 import { runtimeResultArtifacts } from "./runtime-result-artifacts.js";
 
 import { ArchivedWorker, DeliveryRecord } from "./orchestration-history";
@@ -399,7 +399,7 @@ export function createWorkers(
                 artifacts: latest.artifacts,
               }
             : undefined;
-      // Descriptors in details are consumed by attach_artifacts, not automatically attached.
+      // Inspection discovers references; it does not produce attachment effects.
       return {
         ...reply(
           JSON.stringify({
@@ -419,7 +419,13 @@ export function createWorkers(
               : {}),
           }),
         ),
-        details: JSON.parse(JSON.stringify(result?.artifacts ?? {})) as Record<string, JsonValue>,
+        details: result
+          ? {
+              referencedArtifacts: JSON.parse(
+                JSON.stringify(mergeResponseArtifacts(result.artifacts)),
+              ) as JsonValue,
+            }
+          : {},
       };
     }, ctx);
     return local;

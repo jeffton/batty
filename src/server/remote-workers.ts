@@ -665,13 +665,28 @@ export class RemoteWorkers {
       if (decoded.parentId) decoded.parentId = remoteSessionId(node, decoded.parentId);
       if (decoded.workers)
         decoded.workers = decoded.workers.map((worker) => qualifiedWorker(node, worker));
-      if (decoded.latest)
-        decoded.latest.text = reportWithArtifacts(
-          decoded.latest.text.split(
-            "\n\nExisting response artifacts available for explicit forwarding:",
-          )[0]!,
-          (await this.importValue(node, result.details ?? {})) as AgentTurnArtifacts,
-        );
+      if (args.action === "inspect") {
+        const details = result.details as
+          | (AgentTurnArtifacts & { referencedArtifacts?: AgentTurnArtifacts })
+          | undefined;
+        const artifacts = (await this.importValue(
+          node,
+          details?.referencedArtifacts ?? details ?? {},
+        )) as AgentTurnArtifacts;
+        if (decoded.latest)
+          decoded.latest.text = reportWithArtifacts(
+            decoded.latest.text.split(
+              "\n\nExisting response artifacts available for explicit forwarding:",
+            )[0]!,
+            artifacts,
+          );
+        return {
+          output: [{ type: "text" as const, text: JSON.stringify(decoded) }],
+          ...(decoded.latest
+            ? { details: { referencedArtifacts: artifacts } as unknown as JsonValue }
+            : {}),
+        };
+      }
       output = JSON.stringify(decoded);
     }
     if (args.action === "await") {

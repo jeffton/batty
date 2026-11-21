@@ -466,7 +466,9 @@ test.each(["running", "artifact"])(
           action: "inspect",
           sessionId: worker.sessionId,
         });
-        expect("details" in inspected && inspected.details).toMatchObject(artifacts);
+        expect("details" in inspected && inspected.details).toMatchObject({
+          referencedArtifacts: artifacts,
+        });
         expect(messages).toContain("partial-fault-site");
       }
       expect(

@@ -11,7 +11,24 @@ export type RuntimeResultArtifacts = AgentTurnArtifacts & {
   forwardedArtifacts?: AgentTurnArtifacts;
 };
 
-/** Only the answered input's own transcript contributes report artifacts. */
+type HistoricalCodemodeCall = {
+  name?: string;
+  args?: string;
+  details?: RuntimeResultArtifacts;
+};
+
+function isHistoricalInspection(call: HistoricalCodemodeCall): boolean {
+  if (call.name !== "subagent" || !call.args || !call.details) return false;
+  const { sentFiles, sites, fileChanges, battyFileChanges } = call.details;
+  if (!sentFiles && !sites && !fileChanges && !battyFileChanges) return false;
+  try {
+    return (JSON.parse(call.args) as { action?: string } | null)?.action === "inspect";
+  } catch {
+    return false;
+  }
+}
+
+/** Only the assignment's own effects and child deliveries contribute report artifacts. */
 export function runtimeResultArtifacts(entries: readonly EntryRecord[]): RuntimeResultArtifacts {
   const files = new Map<string, SentFileDescriptor>();
   const sites = new Map<string, SiteAttachmentDescriptor>();
@@ -43,13 +60,33 @@ export function runtimeResultArtifacts(entries: readonly EntryRecord[]): Runtime
       mutations.push(change);
     }
   };
+  const inspections = new Set<string>();
   for (const entry of entries) {
     for (const message of entry.model ?? []) {
+      if (message.role === "assistant") {
+        for (const block of message.content)
+          if (
+            block.type === "toolCall" &&
+            block.name === "subagent" &&
+            block.arguments?.action === "inspect"
+          )
+            inspections.add(block.id);
+      }
       if (message.role === "user") {
         const notice = decodeRuntimeNotice(message.content);
         add(notice?.data?.runtimeResultArtifacts as RuntimeResultArtifacts | undefined);
       }
-      if (message.role === "toolResult") add(message.details as RuntimeResultArtifacts | undefined);
+      if (message.role !== "toolResult" || inspections.has(message.toolCallId)) continue;
+      const details = message.details as
+        | (RuntimeResultArtifacts & { calls?: HistoricalCodemodeCall[] })
+        | undefined;
+      // Older codemode rows flattened inspected artifacts into the batch's effects.
+      // Recover effects from individual calls in affected batches without rewriting history.
+      if (message.toolName === "codemode" && details?.calls?.some(isHistoricalInspection)) {
+        for (const call of details.calls) if (!isHistoricalInspection(call)) add(call.details);
+      } else {
+        add(details);
+      }
     }
   }
   // Child reports can arrive after later parent edits. Keep raw snapshots across

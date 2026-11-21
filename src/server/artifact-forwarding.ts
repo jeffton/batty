@@ -61,8 +61,9 @@ export function reportWithArtifacts(text: string, artifacts: AgentTurnArtifacts 
   ].join("\n\n");
 }
 
-type ArtifactDetails = AgentTurnArtifacts & {
-  calls?: Array<AgentTurnArtifacts & { name?: string; details?: AgentTurnArtifacts }>;
+type ArtifactReferences = AgentTurnArtifacts & { referencedArtifacts?: AgentTurnArtifacts };
+type ArtifactDetails = ArtifactReferences & {
+  calls?: Array<ArtifactReferences & { name?: string; details?: ArtifactReferences }>;
 };
 
 export function artifactsFromModelMessages(
@@ -77,7 +78,9 @@ export function artifactsFromModelMessages(
     }
     if (message.role !== "toolResult") return [];
     const details = message.details as ArtifactDetails | undefined;
-    return [details ?? {}, ...(details?.calls ?? []).map((call) => call.details ?? call)];
+    return [details ?? {}, ...(details?.calls ?? []).map((call) => call.details ?? call)].flatMap(
+      (source) => [source, ...(source.referencedArtifacts ? [source.referencedArtifacts] : [])],
+    );
   });
 }
 

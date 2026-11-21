@@ -46,6 +46,7 @@ function entry(id: number) {
             },
           ],
           forwardedArtifacts: { fileChanges: artifacts.fileChanges },
+          referencedArtifacts: { fileChanges: artifacts.fileChanges },
         },
       },
     ],
@@ -88,6 +89,9 @@ test("SQLite persists exact file versions once across legacy migration and new w
       const packed = read.get(2)?.record as string;
       expect(packed.length).toBeLessThan(two.length / 2);
       expect(packed).toContain(store.prefix);
+      expect(
+        Object.keys(JSON.parse(packed).model[1].details.referencedArtifacts.fileChanges[0].patch),
+      ).toContain(store.prefix);
       expect(JSON.parse(packed).model[1].details.calls[0].args).toEqual({
         battyFileChanges: artifacts.battyFileChanges,
       });

@@ -6,6 +6,7 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
 import { artifactRefs, createAttachArtifactsTool } from "./artifact-forwarding";
 import { fixture, until } from "./orchestration-test-fixture";
+import { decodeRuntimeNotice } from "./runtime-notices";
 import { orchestrationHistory } from "./orchestration-test-history";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
 
@@ -74,6 +75,18 @@ test("discovery paginates, inspects running reports and archived results, and fo
         return call(JSON.parse((last.content as string).slice(6)));
       if (last.role === "user" && text.includes("start discovery"))
         return call({ action: "run", prompt: "worker discovery", workspaceId: "test" });
+      if (last.role === "user" && text.includes("check predecessor"))
+        return call({ action: "inspect", sessionId: text.match(/check predecessor (\d+)/)![1]! });
+      const input = request.messages.findLast((message) => message.role === "user");
+      if (
+        last.role === "toolResult" &&
+        JSON.stringify(input?.content).includes("check predecessor")
+      ) {
+        if (text.includes("explicit final"))
+          return call({ action: "report", prompt: "inspection only" });
+        if (text.includes("Reported to parent"))
+          return fauxAssistantMessage([fauxText("inspection finished")]);
+      }
       if (last.role === "user" && text.includes("report again"))
         return call({ action: "report", prompt: "new explicit progress" });
       if (last.role === "user" && text.includes("continue discovery"))
@@ -131,7 +144,7 @@ test("discovery paginates, inspects running reports and archived results, and fo
     expect(await harness.snapshot(OrchestrationDoc, context)).toEqual(beforeInspect);
     expect(await harness.snapshot(WorkerDoc, worker.id, context)).toEqual(beforeWorker);
     expect(JSON.stringify(running.content)).toContain("explicit progress");
-    expect(running.details).toEqual(artifacts);
+    expect(running.details).toEqual({ referencedArtifacts: artifacts });
     expect(JSON.stringify(running.content)).not.toContain("private tool transcript");
     // Cron sessions remain discoverable and inspectable like ordinary workers.
     await main.commit(async (tx) => {
@@ -154,7 +167,26 @@ test("discovery paginates, inspects running reports and archived results, and fo
     expect(body.latest.text).toContain("explicit final");
     expect(body.latest.truncated).toBe(true);
     expect(body.latest.text).not.toContain("private tool transcript");
-    expect(completed.details).toEqual(artifacts);
+    expect(completed.details).toEqual({ referencedArtifacts: artifacts });
+    await probe({
+      action: "resume",
+      sessionId: String(worker.id),
+      prompt: `check predecessor ${worker.id}`,
+    });
+    await until(async () => (await orchestration.listRunning()).length === 0);
+    await main.waitForIdle(context);
+    const notices = (await main.context(context)).messages.flatMap((message) =>
+      message.role === "user" ? [decodeRuntimeNotice(message.content)] : [],
+    );
+    for (const label of ["inspection only", "inspection finished"]) {
+      const notice = notices.find(
+        (notice) =>
+          (notice?.data?.runtimeNotice as { markdown?: string } | undefined)?.markdown === label,
+      );
+      expect(notice?.data?.runtimeResultArtifacts).toEqual({});
+    }
+    const inspection = await probe({ action: "inspect", sessionId: String(worker.id) });
+    const inspectionBody = JSON.parse((inspection.content[0] as { text: string }).text);
     waiting = false;
     gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -165,7 +197,7 @@ test("discovery paginates, inspects running reports and archived results, and fo
     const resumedBody = JSON.parse((resumed.content[0] as { text: string }).text);
     expect(resumedBody.status).toBe("running");
     expect(resumedBody.latest.kind).toBe("result");
-    expect(resumedBody.latest.assignmentId).toBe(body.latest.assignmentId);
+    expect(resumedBody.latest.assignmentId).toBe(inspectionBody.latest.assignmentId);
     release();
     await until(async () => (await orchestration.listRunning()).length === 0);
     await main.waitForIdle(context);

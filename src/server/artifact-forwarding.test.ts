@@ -61,6 +61,32 @@ test("forwards only selected saved objects, including replay", async () => {
   ).toEqual([diff]);
 });
 
+test.each(["direct", "codemode"])(
+  "an inspection alone supplies forwardable refs without creating attachment effects (%s)",
+  async (mode) => {
+    const referencedArtifacts = { fileChanges: [diff], sites: [browser, other] };
+    const details =
+      mode === "codemode"
+        ? {
+            calls: [
+              { name: "subagent", args: '{"action":"inspect"}', details: { referencedArtifacts } },
+            ],
+          }
+        : { referencedArtifacts };
+    const messages = [
+      { role: "toolResult", toolName: mode === "codemode" ? "codemode" : "subagent", details },
+    ];
+    expect(runtimeResultArtifacts([{ model: messages }] as never)).toEqual({});
+    const selection = { fileChanges: [diff], sites: [browser] };
+    const result = await createAttachArtifactsTool().execute(
+      { refs: artifactRefs(selection).map(({ ref }) => ref) },
+      apiFor(messages),
+      context,
+    );
+    expect(result.details).toMatchObject({ forwardedArtifacts: selection });
+  },
+);
+
 test("forwarding adds to existing response metadata without removing sites or duplicating objects", () => {
   expect(mergeResponseArtifacts({ sites: [site] }, { fileChanges: [diff] })).toEqual({
     fileChanges: [diff],

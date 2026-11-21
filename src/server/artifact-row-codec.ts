@@ -9,6 +9,7 @@ const patchArrays = ["fileChanges", "battyDeliveredFileChanges"];
 const carriers = [
   "artifacts",
   "forwardedArtifacts",
+  "referencedArtifacts",
   "runtimeResultArtifacts",
   "model",
   "details",

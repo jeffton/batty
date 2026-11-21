@@ -49,6 +49,51 @@ test("direct and codemode effects preserve source URLs, deduplicate assets and m
   expect(artifacts.fileChanges![0]!.patch).toContain("-a\n+c");
   expect(artifacts.fileChanges![0]!.patch).not.toContain("-b");
 });
+test("old inspection results are not effects, even in a mixed codemode batch", () => {
+  const inspected = {
+    sentFiles: [file],
+    sites: [site],
+    fileChanges: [{ path: "old.ts", patch: "old diff" }],
+    battyFileChanges: [{ path: "old.ts", before: "a", after: "b" }],
+  };
+  const ownFile = { ...file, id: "own", name: "new.png" };
+  const forwarded = { sites: [site] };
+  const artifacts = runtimeResultArtifacts([
+    entry([
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "look", name: "subagent", arguments: { action: "inspect" } },
+        ],
+      },
+      { role: "toolResult", toolName: "subagent", toolCallId: "look", details: inspected },
+    ]),
+    entry([
+      {
+        role: "toolResult",
+        toolName: "codemode",
+        details: {
+          ...inspected,
+          sentFiles: [file, ownFile],
+          forwardedArtifacts: forwarded,
+          calls: [
+            { name: "subagent", args: '{"action":"inspect"}', details: inspected },
+            { name: "subagent", args: "undefined", status: "error", details: null },
+            { name: "subagent", args: "null", status: "error", details: null },
+            { name: "attach_files", args: "{}", details: { sentFiles: [ownFile] } },
+            {
+              name: "attach_artifacts",
+              args: "{}",
+              details: { ...forwarded, forwardedArtifacts: forwarded },
+            },
+          ],
+        },
+      },
+    ]),
+  ]);
+  expect(artifacts).toEqual({ sentFiles: [ownFile], sites: [site] });
+});
+
 test("nested worker assets pass to the cron parent; unchanged mutations have no diff", () => {
   const content = encodeRuntimeNotice({
     kind: "subagent",

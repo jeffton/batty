@@ -1,3 +1,27 @@
+# Dependency review — 2026-11-23
+
+Checked 72 npm pin and maintained-major entries, including both catalog entries, both patched-package targets and pnpm. The 24-hour cutoff is November 22 at 09:00 UTC; the configured exceptions are unchanged.
+
+| Package                      | Update                             |
+| ---------------------------- | ---------------------------------- |
+| Fastify multipart; static    | 10.1.8 → 10.1.9; 10.1.11 → 10.1.12 |
+| Lucide Vue; Marked           | 1.73.0 → 1.77.0; 18.2.0 → 18.2.1   |
+| Virtua; Vue/compiler         | 0.54.2 → 0.55.0; 3.5.45 → 3.5.46   |
+| Vite Plus; aliased Vite Core | 1.6.0 → 1.7.0; 1.6.0 → 8.3.8000    |
+| find-my-way 9 override; pnpm | 9.10.0 → 9.10.2; 12.21.0 → 12.22.0 |
+
+Vite Plus publishes its Core with a Vite-compatible version. The catalog uses Core 8.3.8000 and drops the broad Vite peer exception; `pnpm peers check` passes. Vite Plus bundles tsrs in place of tsgolint, but Vue SFC type checking still runs through `vue-tsc` 3.3.14 with stock TypeScript 6.0.3. Stable TS 7.0.2 still requires a compiler bridge for Vue. Vite's CSS entry restriction and the `pack.envPrefix` fix do not affect Batty's configuration.
+
+Multipart hardens `saveRequestFiles`; Batty streams `request.parts`. Static fixes denied dot-directory listings; Batty does not enable listings. The router patch fixes path matching and lookup normalization within Fastify's supported range. Vue fixes scoped compiler types, transitions and Teleport/Suspense. Virtua changes scroll anchoring and offsets without replacing Batty's Vue Virtualizer API. Marked fixes parser correctness and performance; Lucide's rename and metadata updates require no icon changes. pnpm 12.22 fixes policy revalidation after registry changes; the lockfile format and patches are unchanged. The maintained overrides remain in place.
+
+Pi/Chord remain aligned at **1.6.0**; no SDK, durable storage, transcript, queue, event, compaction or provider migration is crossed. Workbox remains **7.4.1**. Patchright **1.64.3** still uses Playwright Core **1.64.1**, with identical browser manifests (Chromium revision 1248); newer Playwright **1.65.1** has different revisions. Installed and running Linux Chrome **158.0.8127.36** matches Google's current Stable package. No Chrome update or browser restart is needed.
+
+Release-age holds: Lucide 1.78.0, Pierre Diffs 1.7.0/1.7.1, DOMPurify 3.5.0 and pnpm 12.23.0. DOMPurify 3.5.0 contains security fixes and has no configured exception.
+
+Sources: [multipart](https://github.com/fastify/fastify-multipart/compare/v10.1.8...v10.1.9), [static](https://github.com/fastify/fastify-static/releases/tag/v10.1.12), [Lucide 1.74–1.77](https://github.com/lucide-icons/lucide/compare/1.73.0...1.77.0), [Marked](https://github.com/markedjs/marked/releases/tag/v18.2.1), [Virtua](https://github.com/inokawa/virtua/releases/tag/0.55.0), [Vue](https://github.com/vuejs/core/blob/v3.5.46/CHANGELOG.md), [Vite Plus and bundled tools](https://github.com/voidzero-dev/vite-plus/releases/tag/v1.7.0), [find-my-way 9.10.1](https://github.com/delvedor/find-my-way/releases/tag/v9.10.1) and [9.10.2](https://github.com/delvedor/find-my-way/releases/tag/v9.10.2), [pnpm](https://github.com/pnpm/pnpm/releases/tag/v12.22.0), [DOMPurify](https://github.com/cure53/DOMPurify/releases/tag/3.5.0), [Chrome Stable](https://chromereleases.googleblog.com/2026/11/stable-channel-update-for-desktop_01699533288.html).
+
+Validation: independent Sol review approved. Frozen installation, peer checks, `pnpm check`, `pnpm build`, both Linux deployment regression scripts, packaged startup and offline verification passed. The full gate (`pnpm test --maxWorkers=4`) passed all 236 files: 1,270 tests passed and two skipped in 140 seconds. The worker count was reduced for concurrent host load; test assertions and deadlines are unchanged. Production audit is clean; two existing moderate build-chain advisories require major dependency changes outside this update.
+
 # Pi dependency review — 2026-11-20
 
 All eight pinned Pi/Chord packages move from **1.5.2 to 1.6.0**, the current npm stable release. [Pi 1.6.0](https://github.com/earendil-works/pi/releases/tag/v1.6.0) places the system prompt in the first `developer` input item for Codex OAuth instead of top-level `instructions` ([upstream fix](https://github.com/earendil-works/pi/pull/12319)). User/history roles and session cache keys are unchanged. Existing sessions can see a cold cache because the serialized prefix changed; the new stable prefix is cacheable across turns. Batty's explicitly selected models and prompt assembly are unchanged. GPT-6.2 supports neither `none` nor `minimal` reasoning, and OpenAI may drop replayed reasoning after an earlier prefix changes (for example on compaction), without changing persisted messages.

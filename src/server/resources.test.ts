@@ -46,6 +46,7 @@ test("popover skills include global, execution and configured assistant workspac
   const assistant = path.join(root, "assistant");
   const other = path.join(root, "other");
   const currentFile = await skill(current, "project-skill");
+  const currentWorkspaceFile = await skill(current, "workspace-skill", "workspace-skill", true);
   const assistantFile = await skill(assistant, "assistant-skill", "assistant-skill", true);
   const otherFile = await skill(other, "other-skill");
   const config = await setup([root], "assistant");
@@ -56,22 +57,26 @@ test("popover skills include global, execution and configured assistant workspac
     globalFile,
     currentFile,
     assistantFile,
+    currentWorkspaceFile,
   ]);
-  // Prompt resources retain their existing execution-workspace scope.
+  // Prompt skills include both supported skill directories in the execution workspace.
   expect(resources.skills(current).map((entry) => entry.filePath)).toEqual([
     globalFile,
     currentFile,
+    currentWorkspaceFile,
   ]);
   await setAssistantWorkspace(config.battyDir, "other");
   expect((await resources.sessionSkills(current)).map((entry) => entry.filePath)).toEqual([
     globalFile,
     currentFile,
     otherFile,
+    currentWorkspaceFile,
   ]);
   await setAssistantWorkspace(config.battyDir, undefined);
   expect((await resources.sessionSkills(current)).map((entry) => entry.filePath)).toEqual([
     globalFile,
     currentFile,
+    currentWorkspaceFile,
   ]);
 });
 

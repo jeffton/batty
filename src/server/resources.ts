@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadSkills, formatSkillsForPrompt } from "@earendil-works/pi-coding-agent";
@@ -18,6 +19,8 @@ export function createResources(config: AppConfig) {
         path.join(assistantPath, "skills"),
       );
     }
+    const repoSkills = path.join(cwd, "skills");
+    if (existsSync(repoSkills)) skillPaths.push(repoSkills);
     const result = loadSkills({
       cwd,
       agentDir,

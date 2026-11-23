@@ -18,7 +18,7 @@ Create `<data-root>/.batty/options.json` with the required workspace roots and V
 }
 ```
 
-Workspace directories are direct children of the configured roots. Choose the assistant workspace in Settings. Global instructions and skills live in `<data-root>/.batty/AGENTS.md` and `<data-root>/.batty/skills/`; workspaces can supply their own instructions and skills.
+Workspace directories are direct children of the configured roots. Choose the assistant workspace in Settings. Global instructions and skills live in `<data-root>/.batty/AGENTS.md` and `<data-root>/.batty/skills/`. Main, subagents and scheduled jobs discover skills in their execution workspace’s `.batty/skills/` and `skills/`, in that order after global skills.
 
 ```sh
 pnpm dev

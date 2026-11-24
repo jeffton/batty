@@ -56,7 +56,7 @@ test.each([false, true])(
         { browser: Browser; pages: Map<string, Page>; pageEmulation: WeakMap<Page, CDPSession> }
       >;
       queues: Map<string, Promise<void>>;
-      cloudTouches: Map<string, unknown>;
+      viewer: { cloudTouches: Map<string, unknown> };
       serialized<T>(id: string, operation: () => Promise<T>): Promise<T>;
     };
     let acknowledge!: () => void;
@@ -130,7 +130,7 @@ test.each([false, true])(
       await rejectedSocket;
       expect(() => process.kill(pid, 0)).toThrow("ESRCH");
       expect(internals.queues.has("worker")).toBe(false);
-      expect(internals.cloudTouches.size).toBe(0);
+      expect(internals.viewer.cloudTouches.size).toBe(0);
       expect(await service.hasSession("worker")).toBe(false);
       const fresh = await service.execute("worker", { action: "open", url, cloud: true });
       const nextId = fresh.details.sites![0]!.browserId;

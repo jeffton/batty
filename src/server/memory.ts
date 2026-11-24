@@ -2,7 +2,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BACKGROUND_CONTEXT, withCancel } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord/context";
-import type { ImageContent, Models, TextContent } from "@earendil-works/pi-ai";
+import type { Models } from "@earendil-works/pi-ai";
 import {
   LiveDoc,
   ProviderDoc,
@@ -32,6 +32,7 @@ import {
 } from "./memory-view";
 import { isMemoryNoise, stripNoiseClauses } from "./memory-noise";
 import { createMemoryCompressor, MemoryFatalError, NODE_BYTES } from "./memory-compression";
+import { createMemoryReader } from "./memory-reader";
 import { createMemoryRequests } from "./memory-requests";
 import { snapshotView, captureMemorySnapshot, workerMemoryView } from "./memory-snapshot";
 import {
@@ -44,7 +45,6 @@ import {
   MemoryNodesDoc as Nodes,
   type MemoryIndex,
   type MemoryRebuild,
-  type MemorySnapshot,
 } from "./memory-documents";
 
 export { projectEntry, type MemoryLeaf } from "./memory-projection";
@@ -315,6 +315,23 @@ export function createMemory(config: MemoryConfig, models: Models) {
       throw new MemoryFatalError(`Missing memory child ${storedKey(part, generation)}`);
     return text;
   }
+  async function nodeSource(
+    part: Part,
+    context: Context,
+    child: (part: Part) => string | Promise<string>,
+  ) {
+    if (part.count === 1) {
+      const leaf = await leafAt(part.start, context);
+      return isMemoryNoise(leaf) ? "" : `${leaf.kind}: ${leaf.text}`;
+    }
+    const count = part.count / 2;
+    return [
+      await child({ start: part.start, count }),
+      await child({ start: part.start + count, count }),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   async function build(
     part: Part,
     context: Context,
@@ -324,21 +341,9 @@ export function createMemory(config: MemoryConfig, models: Models) {
   ) {
     const existing = await nodeAt(part, context, generation);
     if (!force && existing !== undefined) return;
-    const leaf = part.count === 1 ? await leafAt(part.start, context) : undefined;
-    const source = leaf
-      ? isMemoryNoise(leaf)
-        ? ""
-        : `${leaf.kind}: ${leaf.text}`
-      : [
-          await childText({ start: part.start, count: part.count / 2 }, context, generation),
-          await childText(
-            { start: part.start + part.count / 2, count: part.count / 2 },
-            context,
-            generation,
-          ),
-        ]
-          .filter(Boolean)
-          .join("\n");
+    const source = await nodeSource(part, context, (child) =>
+      childText(child, context, generation),
+    );
     const text = await compress(source.trim(), context, { ...part, operation, generation });
     await main.commit(async (tx) => {
       (await tx.doc(Nodes, main.id, storedKey(part, generation), { text })).text = text;
@@ -637,92 +642,7 @@ export function createMemory(config: MemoryConfig, models: Models) {
       report(error);
       throw error;
     });
-  async function zoom(
-    id: number,
-    count: number,
-    context = BACKGROUND_CONTEXT,
-    snapshot?: MemorySnapshot,
-  ) {
-    await load(context);
-    if (
-      !Number.isInteger(id) ||
-      !Number.isInteger(count) ||
-      count < 1 ||
-      Math.log2(count) % 1 !== 0 ||
-      id < 0 ||
-      id % count !== 0 ||
-      id + count > index.count
-    )
-      throw new Error(`No line ${id}+${count}`);
-    if (count === 1) {
-      const leaf = await leafAt(id, context);
-      return `${id}+0|[${leaf.date}] ${leaf.kind}: ${leaf.text}`;
-    }
-    if (snapshot && id + count > snapshot.prepared)
-      throw new Error(`No prepared line ${id}+${count} in this memory snapshot`);
-    const generation = snapshot?.generation ?? index.generation ?? 0;
-    const children = [
-      { start: id, count: count / 2 },
-      { start: id + count / 2, count: count / 2 },
-    ].map(async (part) => {
-      const startDate = (await leafAt(part.start, context)).date;
-      const endDate = (await leafAt(part.start + part.count - 1, context)).date;
-      return `${key(part)}|[${startDate} .. ${endDate}] ${(await nodeAt(part, context, generation)) ?? "(not summarized yet: zoom it)"}`;
-    });
-    return (await Promise.all(children)).join("\n");
-  }
-  async function zoomOutput(
-    id: number,
-    count: number,
-    context: Context,
-    snapshot?: MemorySnapshot,
-  ): Promise<(TextContent | ImageContent)[]> {
-    const output: (TextContent | ImageContent)[] = [
-      { type: "text", text: await zoom(id, count, context, snapshot) },
-    ];
-    if (count !== 1) return output;
-    const leaf = await leafAt(id, context);
-    const record = await storage.entry(main.id, leaf.source as EntryId, context);
-    if (!record) throw new Error(`Missing original entry for memory message ${id}`);
-    // Ordinals count projected leaves, not model messages: assistants can emit
-    // separate text and tool-call leaves, while system/thinking emit none.
-    let ordinal = leaf.ordinal;
-    for (const message of record.entry.model ?? []) {
-      const count = projectEntry({ ...record.entry, model: [message] }).length;
-      if (ordinal < count) {
-        if (
-          (message.role === "user" || message.role === "toolResult") &&
-          typeof message.content !== "string"
-        )
-          output.push(...message.content.filter((part) => part.type === "image"));
-        return output;
-      }
-      ordinal -= count;
-    }
-    throw new Error(`Missing original message for memory message ${id}`);
-  }
-  async function browserSummary(part: Part, generation: number, context = BACKGROUND_CONTEXT) {
-    const text = await nodeAt(part, context, generation);
-    const summary =
-      text === ""
-        ? "(silent runtime noise excluded; original available below)"
-        : (text ?? "(not summarized yet: zoom it)");
-    return {
-      id: part.start,
-      count: part.count,
-      summary,
-      bytes: utf8Bytes(summary),
-      startDate: (await leafAt(part.start, context)).date,
-      endDate: (await leafAt(part.start + part.count - 1, context)).date,
-    };
-  }
-  async function date(id: number, context = BACKGROUND_CONTEXT) {
-    await load(context);
-    if (!Number.isSafeInteger(id) || id < 0 || id >= index.count)
-      throw new Error(`No message ${id}`);
-    const leaf = await leafAt(id, context);
-    return leaf.date;
-  }
+
   async function captureView(maximum: number, context: Context, count = Number.MAX_SAFE_INTEGER) {
     await syncTo(maximum, context);
     return captureMemorySnapshot(
@@ -750,6 +670,14 @@ export function createMemory(config: MemoryConfig, models: Models) {
     });
   }
   const compress = createMemoryCompressor(config, models, recordMemoryCall, report);
+  const { zoom, zoomOutput, date, browserOverview, browserNode } = createMemoryReader({
+    load,
+    getIndex: () => index,
+    getOverview: () => ({ parts: overviewParts, generation: overviewGeneration }),
+    leafAt,
+    nodeAt,
+    entry: (id, context) => storage.entry(main.id, id, context),
+  });
   const requests = createMemoryRequests({
     main: () => main,
     harness: () => harness,
@@ -873,35 +801,8 @@ export function createMemory(config: MemoryConfig, models: Models) {
           .catch(reportRebuild);
       }
     },
-    async browserOverview() {
-      const parts = overviewParts;
-      const generation = overviewGeneration;
-      return {
-        nodes: await Promise.all(parts.map((part) => browserSummary(part, generation))),
-        prepared: parts.reduce((total, part) => total + part.count, 0),
-        total: index.count,
-      };
-    },
-    async browserNode(id: number, count: number) {
-      if (
-        !Number.isSafeInteger(id) ||
-        !Number.isSafeInteger(count) ||
-        count < 1 ||
-        Math.log2(count) % 1 !== 0 ||
-        id < 0 ||
-        id % count !== 0 ||
-        id + count > index.viewCount
-      )
-        throw new RangeError(`No prepared line ${id}+${count}`);
-      const generation = index.generation ?? 0;
-      if (count === 1) return { children: [], text: await zoom(id, count) };
-      return {
-        children: [
-          await browserSummary({ start: id, count: count / 2 }, generation),
-          await browserSummary({ start: id + count / 2, count: count / 2 }, generation),
-        ],
-      };
-    },
+    browserOverview,
+    browserNode,
     search,
     async repair(roots: Part[], generation: number, dryRun = false) {
       return writeExclusive(async () => {
@@ -938,18 +839,11 @@ export function createMemory(config: MemoryConfig, models: Models) {
         const previous = new Map<string, string>();
         for (const part of parts) {
           previous.set(key(part), await childText(part, context, generation));
-          const child = async (start: number) => {
-            const childPart = { start, count: part.count / 2 };
-            return staged.get(key(childPart)) ?? childText(childPart, context, generation);
-          };
-          const leaf = part.count === 1 ? await leafAt(part.start, context) : undefined;
-          const source = leaf
-            ? isMemoryNoise(leaf)
-              ? ""
-              : `${leaf.kind}: ${leaf.text}`
-            : [await child(part.start), await child(part.start + part.count / 2)]
-                .filter(Boolean)
-                .join("\n");
+          const source = await nodeSource(
+            part,
+            context,
+            (child) => staged.get(key(child)) ?? childText(child, context, generation),
+          );
           staged.set(
             key(part),
             await compress(

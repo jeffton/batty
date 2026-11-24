@@ -2,14 +2,22 @@ import type { EntryRecord } from "@earendil-works/pi-durable";
 import { generateUnifiedPatch } from "@earendil-works/pi-coding-agent";
 import type { AgentTurnArtifacts, DurableFileChange } from "./agent-turn-file-changes";
 import type { SentFileDescriptor, SiteAttachmentDescriptor } from "@/shared/types";
-import { artifactRefs, mergeResponseArtifacts } from "./artifact-forwarding";
+import { artifactRefs, mergeResponseArtifacts, responseArtifacts } from "./artifact-forwarding";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { decodeSiteAttachmentDescriptor } from "./site-attachments";
 
 export type RuntimeResultArtifacts = AgentTurnArtifacts & {
   battyFileChanges?: DurableFileChange[];
   forwardedArtifacts?: AgentTurnArtifacts;
+  reportAttachments?: AgentTurnArtifacts;
 };
+
+export function subagentReportArtifacts(entries: readonly EntryRecord[]): RuntimeResultArtifacts {
+  return {
+    ...runtimeResultArtifacts(entries),
+    reportAttachments: responseArtifacts(entries, { explicitOnly: true }),
+  };
+}
 
 type HistoricalCodemodeCall = {
   name?: string;

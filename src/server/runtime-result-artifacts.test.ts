@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import type { EntryRecord } from "@earendil-works/pi-durable";
-import { runtimeResultArtifacts } from "./runtime-result-artifacts";
+import { runtimeResultArtifacts, subagentReportArtifacts } from "./runtime-result-artifacts";
 import { encodeRuntimeNotice } from "./runtime-notices";
 
 const file = {
@@ -21,6 +21,47 @@ const site = {
 function entry(model: unknown[]): EntryRecord {
   return { model } as unknown as EntryRecord;
 }
+test("report attachments keep explicit deliveries but not browser opens or inherited edits", () => {
+  const browser = (id: string) => ({
+    ...site,
+    id,
+    browserId: id,
+    kind: "browser" as const,
+  });
+  const opened = browser("opened");
+  const attached = browser("attached");
+  const diff = { path: "selected.ts", patch: "explicit patch" };
+  const child = { path: "child.ts", patch: "inherited patch" };
+  const artifacts = subagentReportArtifacts([
+    entry([
+      { role: "toolResult", toolName: "browser", details: { action: "open", sites: [opened] } },
+      { role: "toolResult", toolName: "sites", details: { sites: [site] } },
+      {
+        role: "toolResult",
+        toolName: "subagent",
+        details: { fileChanges: [child], forwardedArtifacts: { fileChanges: [child] } },
+      },
+      {
+        role: "toolResult",
+        toolName: "codemode",
+        details: {
+          sites: [attached],
+          fileChanges: [child, diff],
+          forwardedArtifacts: { fileChanges: [child, diff] },
+          calls: [
+            { name: "browser", details: { action: "attach", sites: [attached] } },
+            { name: "subagent", details: { forwardedArtifacts: { fileChanges: [child] } } },
+            { name: "attach_artifacts", details: { forwardedArtifacts: { fileChanges: [diff] } } },
+          ],
+        },
+      },
+    ]),
+  ]);
+  expect(artifacts.sites).toEqual([opened, site, attached]);
+  expect(artifacts.fileChanges).toEqual([child, diff]);
+  expect(artifacts.reportAttachments).toEqual({ sites: [site, attached], fileChanges: [diff] });
+});
+
 test("direct and codemode effects preserve source URLs, deduplicate assets and merge mutation snapshots", () => {
   const artifacts = runtimeResultArtifacts([
     entry([

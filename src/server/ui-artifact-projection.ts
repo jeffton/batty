@@ -13,8 +13,14 @@ export function projectUiMetadata<T extends object>(metadata: T): T {
   } = metadata as Record<string, unknown>;
   for (const key of ["details", "runtimeResultArtifacts"] as const) {
     const value = visible[key];
-    if (value && typeof value === "object" && !Array.isArray(value))
-      visible[key] = projectUiMetadata(value as Record<string, unknown>);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const artifacts = value as Record<string, unknown>;
+      visible[key] = projectUiMetadata(
+        key === "runtimeResultArtifacts" && artifacts.reportAttachments
+          ? (artifacts.reportAttachments as Record<string, unknown>)
+          : artifacts,
+      );
+    }
   }
   if (Array.isArray(visible.calls)) {
     visible.calls = visible.calls.map((call) =>

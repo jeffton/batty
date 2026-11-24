@@ -28,7 +28,7 @@ import {
   type RuntimeNotice,
 } from "./runtime-notices.js";
 
-import { runtimeResultArtifacts } from "./runtime-result-artifacts.js";
+import { runtimeResultArtifacts, subagentReportArtifacts } from "./runtime-result-artifacts.js";
 import { reportWithAttachments } from "./attachment-contract.js";
 import { reportWithArtifacts } from "./artifact-forwarding.js";
 import type { AgentTurnArtifacts } from "./agent-turn-file-changes.js";
@@ -80,6 +80,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
     childId: ConversationId,
     minEntryId: EntryId | undefined,
     maxEntryId: EntryId | undefined,
+    subagent: boolean,
     ctx: Context,
   ) => {
     const child = (await services.harness.conversation(childId, ctx))!;
@@ -95,7 +96,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
       entries.unshift(...[...page.items].reverse());
       cursor = page.next;
     } while (cursor);
-    return runtimeResultArtifacts(entries);
+    return subagent ? subagentReportArtifacts(entries) : runtimeResultArtifacts(entries);
   };
   const retireAssignment = async (
     childId: ConversationId,
@@ -167,7 +168,13 @@ export function createDeliveryTask(services: OrchestrationServices) {
           const artifacts =
             original?.entry === undefined
               ? undefined
-              : await collectArtifacts(task.input.childId, original.entry, undefined, ctx);
+              : await collectArtifacts(
+                  task.input.childId,
+                  original.entry,
+                  undefined,
+                  !task.input.runId,
+                  ctx,
+                );
           await runtime.commit(
             () => ({
               status: "running",
@@ -306,6 +313,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
             task.input.childId,
             original.entry,
             settled.status === "done" ? settled.answer : undefined,
+            !task.input.runId,
             ctx,
           );
         await runtime.commit(async (tx) => {

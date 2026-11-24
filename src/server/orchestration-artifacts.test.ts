@@ -189,13 +189,21 @@ test("async subagent reports expose artifacts and parent forwards the same live 
       tools: [
         createAttachArtifactsTool(),
         defineTool({
-          name: "attach-fixture",
-          description: "Emit a child attachment",
+          name: "attach_files",
+          description: "Attach the chosen image",
           parameters: Type.Object({}),
           execute: async () => ({
             content: [{ type: "text", text: "Attached" }],
+            details: { sentFiles: [file] },
+          }),
+        }),
+        defineTool({
+          name: "scratch",
+          description: "Produce incidental artifacts during work",
+          parameters: Type.Object({}),
+          execute: async () => ({
+            content: [{ type: "text", text: "Worked" }],
             details: {
-              sentFiles: [file],
               sites: [
                 {
                   kind: "site" as const,
@@ -225,10 +233,10 @@ test("async subagent reports expose artifacts and parent forwards the same live 
           { stopReason: "toolUse" },
         );
       if (last.role === "user" && text.includes("produce attachment"))
-        return fauxAssistantMessage([fauxToolCall("attach-fixture", {})], {
-          stopReason: "toolUse",
-        });
-      if (last.role === "toolResult" && last.toolName === "attach-fixture")
+        return fauxAssistantMessage([fauxToolCall("scratch", {})], { stopReason: "toolUse" });
+      if (last.role === "toolResult" && last.toolName === "scratch")
+        return fauxAssistantMessage([fauxToolCall("attach_files", {})], { stopReason: "toolUse" });
+      if (last.role === "toolResult" && last.toolName === "attach_files")
         return fauxAssistantMessage([fauxText("child artifact ready")]);
       if (last.role === "user" && text.includes("child artifact ready")) {
         reportInput = text;
@@ -255,6 +263,12 @@ test("async subagent reports expose artifacts and parent forwards the same live 
   expect(reportInput).toContain(browserRef);
   expect(reportInput).toContain(browser.browserId);
   const entries = (await main.context(context)).entries;
+  const report = entryMessages(entries).find(
+    (message) => message.role === "custom" && message.text.includes("child artifact ready"),
+  );
+  expect(report?.role === "custom" && report.data?.runtimeResultArtifacts).toEqual({
+    sentFiles: [file],
+  });
   const forwardedCall = entries
     .flatMap((entry) => entry.model ?? [])
     .findLast(

@@ -10,6 +10,7 @@ const carriers = [
   "artifacts",
   "forwardedArtifacts",
   "referencedArtifacts",
+  "reportAttachments",
   "runtimeResultArtifacts",
   "model",
   "details",

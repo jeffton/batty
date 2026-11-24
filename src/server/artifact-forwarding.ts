@@ -62,8 +62,12 @@ export function reportWithArtifacts(text: string, artifacts: AgentTurnArtifacts 
 }
 
 type ArtifactReferences = AgentTurnArtifacts & { referencedArtifacts?: AgentTurnArtifacts };
-type ArtifactDetails = ArtifactReferences & {
-  calls?: Array<ArtifactReferences & { name?: string; details?: ArtifactReferences }>;
+type ArtifactToolResult = ArtifactReferences & {
+  action?: string;
+  forwardedArtifacts?: AgentTurnArtifacts;
+};
+type ArtifactDetails = ArtifactToolResult & {
+  calls?: Array<ArtifactToolResult & { name?: string; details?: ArtifactToolResult }>;
 };
 
 export function artifactsFromModelMessages(
@@ -126,7 +130,10 @@ export function forwardedResponseArtifacts(entries: readonly EntryRecord[]): Age
 }
 
 /** Native output tools attach their own artifacts; received reports require explicit forwarding. */
-export function responseArtifacts(entries: readonly EntryRecord[]): AgentTurnArtifacts {
+export function responseArtifacts(
+  entries: readonly EntryRecord[],
+  { explicitOnly = false } = {},
+): AgentTurnArtifacts {
   const ownedArtifacts = entries.flatMap((entry) =>
     (entry.model ?? []).flatMap((message) => {
       if (message.role !== "toolResult" || (message.isError && message.toolName !== "codemode"))
@@ -142,7 +149,9 @@ export function responseArtifacts(entries: readonly EntryRecord[]): AgentTurnArt
       return owned.flatMap(({ name, artifacts }): AgentTurnArtifacts[] => {
         if (name === "attach_files" || name === "sites")
           return [{ sentFiles: artifacts?.sentFiles, sites: artifacts?.sites }];
-        if (name === "browser")
+        if (explicitOnly && name === "attach_artifacts")
+          return [artifacts?.forwardedArtifacts ?? {}];
+        if (name === "browser" && (!explicitOnly || artifacts?.action === "attach"))
           return [
             {
               sites: (artifacts?.sites ?? [])
@@ -154,7 +163,9 @@ export function responseArtifacts(entries: readonly EntryRecord[]): AgentTurnArt
       });
     }),
   );
-  return mergeResponseArtifacts(forwardedResponseArtifacts(entries), ...ownedArtifacts);
+  return mergeResponseArtifacts(
+    ...(explicitOnly ? ownedArtifacts : [forwardedResponseArtifacts(entries), ...ownedArtifacts]),
+  );
 }
 
 export function createAttachArtifactsTool() {

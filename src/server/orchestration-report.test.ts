@@ -156,7 +156,10 @@ test.each([false, true])(
         notice?.text.startsWith(`[subagent ${child.id} report]`),
       );
       expect(progress).toHaveLength(1);
-      expect(progress[0]!.data!.runtimeResultArtifacts).toEqual(artifacts);
+      expect(progress[0]!.data!.runtimeResultArtifacts).toEqual({
+        ...artifacts,
+        reportAttachments: {},
+      });
       const forwardedResult = (await parent.context(context)).messages.findLast(
         (message) => message.role === "toolResult" && message.toolName === "attach_artifacts",
       );

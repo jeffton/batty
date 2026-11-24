@@ -183,7 +183,7 @@ test("discovery paginates, inspects running reports and archived results, and fo
         (notice) =>
           (notice?.data?.runtimeNotice as { markdown?: string } | undefined)?.markdown === label,
       );
-      expect(notice?.data?.runtimeResultArtifacts).toEqual({});
+      expect(notice?.data?.runtimeResultArtifacts).toEqual({ reportAttachments: {} });
     }
     const inspection = await probe({ action: "inspect", sessionId: String(worker.id) });
     const inspectionBody = JSON.parse((inspection.content[0] as { text: string }).text);

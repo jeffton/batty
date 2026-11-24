@@ -21,13 +21,16 @@ test("chromium: attachment popover zooms without navigation and downloads authen
     "/old-image";
   const requests: { search: string; authenticated: boolean }[] = [];
   const backend = fastify({ forceCloseConnections: true });
+  let downloadAvailable = false;
   backend.get("/api/sent-files/*", (request, reply) => {
     const url = new URL(request.url, "http://localhost");
     const authenticated = request.headers.cookie?.includes("attachment-auth=test") ?? false;
     requests.push({ search: url.search, authenticated });
     if (!authenticated) return reply.code(401).send();
-    if (url.searchParams.has("download"))
+    if (url.searchParams.has("download")) {
+      if (!downloadAvailable) return reply.code(404).send();
       reply.header("content-disposition", "attachment; filename=Cabin.jpg");
+    }
     return reply.type("image/jpeg").send(original);
   });
   const target = await backend.listen({ host: "127.0.0.1", port: 0 });
@@ -115,9 +118,17 @@ test("chromium: attachment popover zooms without navigation and downloads authen
     await page.keyboard.press("Escape");
     await expect.poll(() => dialog.isVisible()).toBe(false);
 
+    const downloadLink = page.getByRole("link", { name: "Download", exact: true });
+    await downloadLink.click();
+    const downloadError = page.getByRole("alert");
+    await downloadError.waitFor();
+    expect(await downloadError.textContent()).toContain("HTTP 404");
+
+    downloadAvailable = true;
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("link", { name: "Download", exact: true }).click();
+    await downloadLink.click();
     const download = await downloadPromise;
+    await downloadError.waitFor({ state: "hidden" });
     expect(download.url()).toMatch(/^blob:/);
     expect(download.suggestedFilename()).toBe("Cabin.jpg");
     expect(await buffer(await download.createReadStream())).toEqual(original);

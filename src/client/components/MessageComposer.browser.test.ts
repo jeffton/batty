@@ -575,6 +575,51 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
   }
 }, 45_000);
 
+test("refreshes a draft removed elsewhere without changing the message being composed", async () => {
+  const page = (await browser.newPage()) as Page;
+  try {
+    await page.goto(`${url}?drafts`);
+    await page.context().setOffline(true);
+    const composer = page.getByRole("textbox", { name: "Chat message" });
+    await composer.fill("Already saved");
+    await page.getByRole("button", { name: /^Drafts:/ }).click();
+    await page.getByRole("button", { name: "Save to drafts" }).click();
+    const draft = page.getByRole("button", { name: "Already saved", exact: true });
+    await draft.waitFor();
+    await composer.fill("Keep composing");
+
+    // Apply the other client's deletion before its notification reaches this view.
+    await page.evaluate(async () => {
+      const info = (await indexedDB.databases()).find(({ name }) =>
+        name?.endsWith(":drafts:fixture:database"),
+      )!;
+      await new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open(info.name!);
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction("drafts", "readwrite");
+          const drafts = tx.objectStore("drafts");
+          const keys = drafts.getAllKeys();
+          keys.onsuccess = () => drafts.put({ id: keys.result[0], pending: true });
+          tx.onabort = () => reject(tx.error);
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+        };
+      });
+    });
+    await draft.click();
+
+    await page.getByText("No drafts.").waitFor();
+    expect(await composer.inputValue()).toBe("Keep composing");
+    expect(await page.getByRole("alert").count()).toBe(0);
+  } finally {
+    await page.close();
+  }
+});
+
 test("keeps Drafts action columns lined up with a classic scrollbar", async () => {
   const page = (await browser.newPage({ viewport: { width: 760, height: 560 } })) as Page;
   try {

@@ -97,5 +97,11 @@ export function useDrafts(enabled: Readonly<Ref<boolean>>, online: Readonly<Ref<
     window.removeEventListener("offline", pause);
     document.removeEventListener("visibilitychange", wake);
   });
-  return { drafts, error: computed(() => storageError.value || syncError.value), changed, wake };
+  return {
+    drafts,
+    error: computed(() => storageError.value || syncError.value),
+    changed,
+    refresh,
+    wake,
+  };
 }

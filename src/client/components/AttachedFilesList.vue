@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { reactive } from "vue";
 import TranscriptImage from "./TranscriptImage.vue";
 import type { SentFileDescriptor } from "@/shared/types";
 
@@ -14,19 +15,37 @@ const props = withDefaults(
   },
 );
 
+const downloadErrors = reactive(new Map<string, string>());
+const downloading = reactive(new Set<string>());
+
 async function downloadSentFile(event: MouseEvent, file: SentFileDescriptor): Promise<void> {
   event.preventDefault();
-  const response = await fetch(file.downloadUrl, { credentials: "include" });
-  if (!response.ok) {
-    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+  if (downloading.has(file.id)) return;
+  downloading.add(file.id);
+  downloadErrors.delete(file.id);
+  try {
+    const response = await fetch(file.downloadUrl, { credentials: "include" });
+    if (!response.ok) {
+      downloadErrors.set(file.id, `Download failed (HTTP ${response.status}).`);
+      return;
+    }
+    downloadBlob(await response.blob(), file.name);
+  } catch (error) {
+    downloadErrors.set(
+      file.id,
+      `Download failed: ${error instanceof Error ? error.message : error}`,
+    );
+  } finally {
+    downloading.delete(file.id);
   }
+}
 
+function downloadBlob(blob: Blob, name: string): void {
   // Blob downloads keep iOS standalone apps out of the native URL preview.
-  const blob = await response.blob();
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = objectUrl;
-  link.download = file.name;
+  link.download = name;
   link.style.display = "none";
   document.body.append(link);
   link.click();
@@ -84,11 +103,15 @@ function formatFileSize(size: number): string {
       <a
         :href="file.downloadUrl"
         :download="file.name"
+        :aria-disabled="downloading.has(file.id)"
         class="attached-files__download"
         @click="downloadSentFile($event, file)"
       >
         Download
       </a>
+      <span v-if="downloadErrors.has(file.id)" role="alert" class="attached-files__error">
+        {{ downloadErrors.get(file.id) }}
+      </span>
     </article>
   </div>
 </template>
@@ -110,6 +133,10 @@ function formatFileSize(size: number): string {
   border: 1px solid var(--color-border);
   border-radius: 0.65rem;
   background: var(--color-bg-panel);
+}
+
+.attached-files__error {
+  color: var(--color-error);
 }
 
 .attached-files__preview {

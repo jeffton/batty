@@ -70,6 +70,7 @@ const {
   drafts,
   error: syncError,
   changed,
+  refresh,
   wake,
 } = useDrafts(
   draftsEnabled,
@@ -190,20 +191,25 @@ async function moveDraft(id?: string): Promise<void> {
     const slot = await slotKey(sessionKey);
     const displaced = current.text.length || current.files.length ? newDraft(current) : undefined;
     const selected = id ? await consumeDraft(slot, id, displaced) : undefined;
-    if (id && !selected) throw new Error("This draft has already been removed.");
-    if (!id && displaced) await saveDraft(displaced, slot);
-    changed();
-    if (props.sessionKey === sessionKey) {
-      applyPayload(selected ?? { text: "", files: [] });
-      clearSessionDraft(sessionKey);
-      if (selected) {
-        draftControl.value?.close();
-        void nextTick(() => textarea.value?.focus());
+    if (id) {
+      if (!selected) {
+        await refresh();
+        return;
       }
+    } else if (displaced) {
+      await saveDraft(displaced, slot);
+    }
+
+    changed();
+    if (props.sessionKey !== sessionKey) return;
+    applyPayload(selected ?? { text: "", files: [] });
+    clearSessionDraft(sessionKey);
+    if (selected) {
+      draftControl.value?.close();
+      void nextTick(() => textarea.value?.focus());
     }
   } catch (error) {
     reportDraftError(error);
-    changed();
   } finally {
     draftBusy.value = false;
   }
@@ -339,7 +345,6 @@ async function addFiles(next: FileList | File[]): Promise<void> {
       return;
     }
 
-    // Commit synchronously against the latest draft, including overlapping selections.
     const hashes = new Set(files.value.map((file) => fileHashes.get(file)));
     const added = incoming.filter((file) => {
       const hash = fileHashes.get(file)!;

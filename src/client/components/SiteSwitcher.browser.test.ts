@@ -448,6 +448,65 @@ test.each(["dark", "light"] as const)(
   30_000,
 );
 
+test.each(["keyboard", "keyboard moved away", "touch"] as const)(
+  "does not steal focus when the site list arrives after opening via %s",
+  async (input) => {
+    const touch = input === "touch";
+    const context = await browser.newContext({
+      viewport: { width: 320, height: 660 },
+      isMobile: touch,
+      hasTouch: touch,
+    });
+    const page = await context.newPage();
+    const release = Promise.withResolvers<void>();
+    try {
+      const site = descriptor("current", "Current site");
+      await siteFixture(page, [site], [site.id]);
+      await fixtureOperation(server, page, "site.catalog", async (_input, _context, next) => {
+        await release.promise;
+        return next();
+      });
+      await page.goto(url);
+      await page.getByRole("button", { name: "Sites", exact: true }).click();
+      const switcher = page.getByRole("dialog", { name: "Sites", exact: true });
+      const trigger = switcher.getByRole("button", { name: "Choose site", exact: true });
+      const share = switcher.getByRole("button", { name: "Share site", exact: true });
+      if (touch) await trigger.tap();
+      else await trigger.press("Enter");
+      const choices = page.getByRole("list", { name: "Available sites" });
+      await expect.poll(() => switcher.locator("iframe").getAttribute("inert")).toBe("");
+      expect(await choices.isVisible()).toBe(false);
+      expect(await trigger.evaluate((element) => element.matches(":focus"))).toBe(true);
+      if (input === "keyboard moved away") {
+        await page.keyboard.press("Tab");
+        expect(await share.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+      }
+      release.resolve();
+      const choice = choices.getByRole("button", { name: site.name });
+      await choice.waitFor();
+      expect(await choice.evaluate((element) => element.matches(":focus-visible"))).toBe(
+        input === "keyboard",
+      );
+      if (input === "keyboard moved away") {
+        expect(await share.evaluate((element) => element.matches(":focus"))).toBe(true);
+      } else {
+        if (touch) {
+          expect(await trigger.evaluate((element) => element.matches(":focus"))).toBe(true);
+          await page.keyboard.press("Tab");
+          expect(await choice.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+        }
+        await page.keyboard.press("Escape");
+        await choices.waitFor({ state: "hidden" });
+        expect(await trigger.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+      }
+    } finally {
+      release.resolve();
+      await context.close();
+    }
+  },
+  30_000,
+);
+
 test("a delayed open response cannot replace the current site", async () => {
   const page = await browser.newPage();
   const release = Promise.withResolvers<void>();

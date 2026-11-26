@@ -91,8 +91,8 @@ it.each([502, 503, 504])(
     vi.useFakeTimers();
     responses();
     vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: false, status } as Response)
-      .mockResolvedValueOnce({ ok: false, status } as Response)
+      .mockResolvedValueOnce(new Response(null, { status }))
+      .mockResolvedValueOnce(new Response(null, { status }))
       .mockResolvedValueOnce({ ok: true, json: async () => ({ buildId: "current" }) } as Response);
     const { initializeBuild, checkAppUpdate } = await import("./app-updates");
     initializeBuild("current");
@@ -110,6 +110,24 @@ it.each([502, 503, 504])(
     ]);
   },
 );
+
+it("navigates to maintenance immediately instead of retrying the gated API", async () => {
+  const replace = vi.fn();
+  vi.stubGlobal("window", { location: { replace } });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 503,
+        headers: { "X-Batty-Maintenance": "1" },
+      }),
+    ),
+  );
+  const { checkAppUpdate } = await import("./app-updates");
+  await expect(checkAppUpdate()).rejects.toThrow("Batty is under maintenance");
+  expect(replace).toHaveBeenCalledWith("/maintenance/");
+  expect(fetch).toHaveBeenCalledOnce();
+});
 
 it("does not reload an unchanged build", async () => {
   const reload = responses();

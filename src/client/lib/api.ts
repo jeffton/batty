@@ -6,6 +6,7 @@ import type {
 } from "@simplewebauthn/browser";
 import type { SubscriptionProviderId } from "@/shared/provider-auth";
 import { withBaseUrl } from "./base-url";
+import { redirectIfMaintenance } from "./maintenance-navigation";
 import { closeRpcTransport, rpcCall, type RpcCallOptions } from "./rpc";
 import type { OwnerInputs, OwnerOutputs } from "@/shared/owner-api";
 import { RpcError } from "@/shared/rpc";
@@ -62,6 +63,7 @@ async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     for (let attempt = 0; ; attempt += 1) {
       response = await fetch(withBaseUrl(path), { credentials: "include", ...init });
+      redirectIfMaintenance(response);
       if (![502, 503, 504].includes(response.status)) break;
       // Only bootstrap is a safe background read. Never replay authentication
       // or logout commands, even when the proxy reports an unavailable backend.

@@ -1,4 +1,5 @@
 import { withBaseUrl } from "./base-url";
+import { redirectIfMaintenance } from "./maintenance-navigation";
 import { getAppServiceWorkerRegistration } from "./service-worker";
 import { installationStorageKey } from "./installation-storage";
 import { withFetchDiagnostics } from "./browser-errors";
@@ -44,6 +45,7 @@ async function fetchAvailableResponse(path: string, label: string): Promise<Resp
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     });
+    redirectIfMaintenance(response);
     if (response.ok) return response;
     // Deploys can briefly leave the proxy without a healthy backend. Wait for
     // it rather than navigating into the same outage. Persistent errors surface.

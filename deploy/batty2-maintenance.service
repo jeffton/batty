@@ -1,0 +1,25 @@
+[Unit]
+Description=Batty maintenance status and diagnostics
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=roy
+Group=roy
+WorkingDirectory=/opt/batty2/current
+Environment=HOME=/home/roy
+Environment=BATTY_SELF_PATH=/opt/batty2/current
+Environment=BATTY_PROVIDER_AUTH_PATH=/home/roy/github/.batty/auth.json
+ExecStart=/usr/bin/node /opt/batty2/current/dist/server/maintenance-server.mjs /var/lib/batty2
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/batty2/.batty /home/roy/github/.batty
+InaccessiblePaths=-/var/lib/batty2/.batty/runtime.sqlite -/var/lib/batty2/.batty/runtime.sqlite-wal -/var/lib/batty2/.batty/runtime.sqlite-shm
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

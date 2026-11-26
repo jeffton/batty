@@ -15,6 +15,7 @@ import type {
   RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { stateDirPath } from "./options";
+import { acquireLock } from "./lock";
 
 export interface StoredPasskeyCredential {
   id: string;
@@ -224,7 +225,13 @@ async function readJsonFile<T>(filePath: string): Promise<T | undefined> {
 
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const temporary = `${filePath}.${crypto.randomUUID()}`;
+  try {
+    await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    await fs.rename(temporary, filePath);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
 }
 
 export class PasskeyAuthService {
@@ -238,17 +245,13 @@ export class PasskeyAuthService {
   ) {}
 
   async initialize(): Promise<SetupCodeResult | undefined> {
-    const state = await this.readState();
-    if (state.credentials.length > 0) {
-      return undefined;
-    }
-
-    const existingSetupCode = await this.readSetupCode();
-    if (existingSetupCode) {
-      return undefined;
-    }
-
-    return this.issueSetupCode("bootstrap");
+    return this.withCredentialLock(async () => {
+      const stored = await readJsonFile<StoredPasskeyState>(passkeyStateFilePath(this.battyDir));
+      const state = normalizePasskeyState(stored);
+      if (JSON.stringify(stored) !== JSON.stringify(state)) await this.writeState(state);
+      if (state.credentials.length > 0 || (await this.readSetupCode())) return;
+      return this.issueSetupCode("bootstrap");
+    });
   }
 
   async issueSetupCode(reason: string, ttlMs = SETUP_CODE_TTL_MS): Promise<SetupCodeResult> {
@@ -330,44 +333,48 @@ export class PasskeyAuthService {
       throw new Error("Passkey registration origin changed. Start again.");
     }
 
-    const setupCode = await this.readSetupCode();
-    if (!setupCode || !sameValue(setupCode.codeHash, pending.setupCodeHash)) {
+    await this.withCredentialLock(async () => {
+      const setupCode = await this.readSetupCode();
+      if (!setupCode || !sameValue(setupCode.codeHash, pending.setupCodeHash)) {
+        this.pendingRegistrations.delete(requestId);
+        throw new Error("Setup code expired. Generate a new one.");
+      }
+
+      const verification = await verifyRegistrationResponse({
+        response,
+        expectedChallenge: pending.challenge,
+        expectedOrigin: origin,
+        expectedRPID: rpID,
+        requireUserVerification: true,
+      });
       this.pendingRegistrations.delete(requestId);
-      throw new Error("Setup code expired. Generate a new one.");
-    }
 
-    const verification = await verifyRegistrationResponse({
-      response,
-      expectedChallenge: pending.challenge,
-      expectedOrigin: origin,
-      expectedRPID: rpID,
-      requireUserVerification: true,
+      if (!verification.verified || !verification.registrationInfo) {
+        throw new Error("Passkey registration failed");
+      }
+
+      const credential = verification.registrationInfo.credential;
+      const now = Date.now();
+      const nextCredential: StoredPasskeyCredential = {
+        id: credential.id,
+        publicKey: Buffer.from(credential.publicKey).toString("base64url"),
+        counter: credential.counter,
+        transports: credential.transports,
+        deviceType: verification.registrationInfo.credentialDeviceType,
+        backedUp: verification.registrationInfo.credentialBackedUp,
+        createdAt: now,
+        lastUsedAt: now,
+      };
+
+      const state = await this.readState();
+      const credentials = state.credentials.filter(
+        (candidate) => candidate.id !== nextCredential.id,
+      );
+      credentials.push(nextCredential);
+      await this.writeState({ ...state, credentials });
+      await this.clearSetupCode();
+      this.clearPendingRegistrationsForSetupCode(setupCode.codeHash);
     });
-    this.pendingRegistrations.delete(requestId);
-
-    if (!verification.verified || !verification.registrationInfo) {
-      throw new Error("Passkey registration failed");
-    }
-
-    const credential = verification.registrationInfo.credential;
-    const now = Date.now();
-    const nextCredential: StoredPasskeyCredential = {
-      id: credential.id,
-      publicKey: Buffer.from(credential.publicKey).toString("base64url"),
-      counter: credential.counter,
-      transports: credential.transports,
-      deviceType: verification.registrationInfo.credentialDeviceType,
-      backedUp: verification.registrationInfo.credentialBackedUp,
-      createdAt: now,
-      lastUsedAt: now,
-    };
-
-    const state = await this.readState();
-    const credentials = state.credentials.filter((candidate) => candidate.id !== nextCredential.id);
-    credentials.push(nextCredential);
-    await this.writeState({ ...state, credentials });
-    await this.clearSetupCode();
-    this.clearPendingRegistrationsForSetupCode(setupCode.codeHash);
   }
 
   async beginAuthentication(origin: string, rpID: string): Promise<AuthenticationOptionsResult> {
@@ -425,48 +432,57 @@ export class PasskeyAuthService {
       throw new Error("Passkey sign-in origin changed. Start again.");
     }
 
-    const state = await this.readState();
-    const matchedCredential = state.credentials.find((credential) => credential.id === response.id);
-    if (!matchedCredential) {
-      throw new Error("Unknown passkey");
-    }
+    await this.withCredentialLock(async () => {
+      const state = await this.readState();
+      const matchedCredential = state.credentials.find(
+        (credential) => credential.id === response.id,
+      );
+      if (!matchedCredential) {
+        throw new Error("Unknown passkey");
+      }
 
-    const verification = await verifyAuthenticationResponse({
-      response,
-      expectedChallenge: pending.challenge,
-      expectedOrigin: origin,
-      expectedRPID: rpID,
-      requireUserVerification: true,
-      credential: this.toWebAuthnCredential(matchedCredential),
+      const verification = await verifyAuthenticationResponse({
+        response,
+        expectedChallenge: pending.challenge,
+        expectedOrigin: origin,
+        expectedRPID: rpID,
+        requireUserVerification: true,
+        credential: this.toWebAuthnCredential(matchedCredential),
+      });
+
+      if (!verification.verified) {
+        throw new Error("Passkey sign-in failed");
+      }
+
+      const now = Date.now();
+      const credentials = state.credentials.map((credential) =>
+        credential.id === matchedCredential.id
+          ? {
+              ...credential,
+              counter: verification.authenticationInfo.newCounter,
+              deviceType: verification.authenticationInfo.credentialDeviceType,
+              backedUp: verification.authenticationInfo.credentialBackedUp,
+              lastUsedAt: now,
+            }
+          : credential,
+      );
+      await this.writeState({ ...state, credentials });
     });
+  }
 
-    if (!verification.verified) {
-      throw new Error("Passkey sign-in failed");
+  private async withCredentialLock<T>(action: () => Promise<T>): Promise<T> {
+    const dir = stateDirPath(this.battyDir);
+    await fs.mkdir(dir, { recursive: true });
+    const unlock = await acquireLock(path.join(dir, "passkeys.lock"));
+    try {
+      return await action();
+    } finally {
+      await unlock();
     }
-
-    const now = Date.now();
-    const credentials = state.credentials.map((credential) =>
-      credential.id === matchedCredential.id
-        ? {
-            ...credential,
-            counter: verification.authenticationInfo.newCounter,
-            deviceType: verification.authenticationInfo.credentialDeviceType,
-            backedUp: verification.authenticationInfo.credentialBackedUp,
-            lastUsedAt: now,
-          }
-        : credential,
-    );
-    await this.writeState({ ...state, credentials });
   }
 
   private async readState(): Promise<StoredPasskeyState> {
-    const filePath = passkeyStateFilePath(this.battyDir);
-    const stored = await readJsonFile<StoredPasskeyState>(filePath);
-    const normalized = normalizePasskeyState(stored);
-    if (JSON.stringify(stored) !== JSON.stringify(normalized)) {
-      await writeJsonFile(filePath, normalized);
-    }
-    return normalized;
+    return normalizePasskeyState(await readJsonFile(passkeyStateFilePath(this.battyDir)));
   }
 
   private async writeState(state: StoredPasskeyState): Promise<void> {

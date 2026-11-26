@@ -18,7 +18,11 @@ function authRateLimitKey(
   return `${flow}:${request.ip}`;
 }
 
-function setAuthCookie(context: RouteContext, request: FastifyRequest, reply: FastifyReply): void {
+type LoginContext = Omit<RouteContext, "config"> & {
+  config: Pick<RouteContext["config"], "authSecret" | "cookieName" | "baseUrl">;
+};
+
+function setAuthCookie(context: LoginContext, request: FastifyRequest, reply: FastifyReply): void {
   reply.setCookie(context.config.cookieName, createAuthToken(context.config.authSecret), {
     httpOnly: true,
     sameSite: "lax",
@@ -28,8 +32,8 @@ function setAuthCookie(context: RouteContext, request: FastifyRequest, reply: Fa
   });
 }
 
-export function registerAuthRoutes(context: RouteContext): void {
-  const { app, passkeys, authAttemptLimiter, routePath, config } = context;
+export function registerLoginRoutes(context: LoginContext): void {
+  const { app, passkeys, authAttemptLimiter, routePath } = context;
 
   app.post(routePath("/api/auth/login/options"), async (request, reply) => {
     const rateLimitKey = authRateLimitKey(request, "login-options");
@@ -72,6 +76,11 @@ export function registerAuthRoutes(context: RouteContext): void {
       reply.send({ ok: true });
     },
   );
+}
+
+export function registerAuthRoutes(context: RouteContext): void {
+  registerLoginRoutes(context);
+  const { app, passkeys, authAttemptLimiter, routePath, config } = context;
 
   app.post<{ Body: { setupCode?: string } }>(
     routePath("/api/auth/register/options"),

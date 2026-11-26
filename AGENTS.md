@@ -16,6 +16,7 @@ bash scripts/deploy-privileges.test.sh
 pnpm build
 node scripts/verify-startup.mjs
 node scripts/verify-offline.mjs
+node scripts/verify-maintenance.mjs
 ```
 
 Record the source revision, commands, results and wall time. Reuse that validation for the same source at commit/push/deploy; do not rerun it as a confirmation ritual. After a test failure, diagnose the failing file or case rather than rerunning the whole suite serially. After fixing source or test behavior, run the final parallel gate on the integrated result. Documentation-only follow-ups need formatting/link checks, not another full suite. Do not add retries or skips to obtain a green run.

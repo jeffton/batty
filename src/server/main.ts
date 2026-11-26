@@ -21,7 +21,8 @@ import { registerDraftRoutes } from "./routes/drafts";
 import { registerSiteRoutes } from "./routes/sites";
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
 import { cloudBrowserAvailable, registerCloudBrowserLauncher } from "./cloud-browser-launcher";
-import { Runtime } from "./runtime";
+import { Runtime, context } from "./runtime";
+import { readMaintenance } from "./maintenance-state";
 import { acquireLock } from "./lock";
 import { resolveUploadedFile } from "./uploads";
 import {
@@ -37,6 +38,13 @@ import { registerPushCompletions } from "./push-completions";
 const config = await loadConfig(resolveBattyDir());
 await fs.mkdir(stateDirPath(config.battyDir), { recursive: true });
 const releaseLock = await acquireLock(path.join(stateDirPath(config.battyDir), "runtime.lock"));
+if ((await readMaintenance(config.battyDir))?.phase === "offline") {
+  console.log(
+    "Batty is in maintenance mode. Run batty2 maintenance allow-start before starting it.",
+  );
+  await releaseLock();
+  process.exit(0);
+}
 const webPush = new WebPushService(config);
 await webPush.initialize();
 let stopPushCompletions!: () => void;
@@ -153,6 +161,17 @@ function settingsStatus() {
   };
 }
 app.get("/healthz", async () => ({ ok: true, mainSessionId: String(runtime.main.id), buildId }));
+app.get("/api/maintenance-model", async (request, reply) => {
+  if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(request.ip))
+    return reply.code(403).send({ error: "Model snapshot requires a local request" });
+  const agent = await runtime.main.agent(context);
+  if (!agent.model) return reply.code(503).send({ error: "Main model is not configured" });
+  return {
+    provider: agent.model.provider,
+    modelId: agent.model.modelId,
+    thinkingLevel: agent.thinkingLevel,
+  };
+});
 app.get("/api/version", async (_request, reply) => {
   reply.header("Cache-Control", "no-store");
   return { buildId };

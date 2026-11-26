@@ -36,11 +36,17 @@ export default defineConfig({
       srcDir: "src/client",
       filename: "sw.ts",
       registerType: "prompt",
+      injectRegister: false,
       includeAssets: ["favicon.png", "apple-touch-icon.png"],
       manifest: false,
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
-        globIgnores: ["index.html"],
+        globIgnores: [
+          "index.html",
+          "maintenance.html",
+          "assets/maintenance-*",
+          "assets/logo-maintenance-*",
+        ],
       },
       devOptions: {
         enabled: true,
@@ -63,6 +69,7 @@ export default defineConfig({
     outDir: "dist/client",
     emptyOutDir: true,
     sourcemap: true,
+    rollupOptions: { input: { index: "index.html", maintenance: "maintenance.html" } },
   },
   test: {
     // Eight workers use the maintained eight-core host without the timeouts
@@ -132,6 +139,7 @@ export default defineConfig({
     deps: { resolveDepSubpath: true },
     entry: {
       main: "src/server/main.ts",
+      "maintenance-server": "src/server/maintenance-server.ts",
       "cron-cli": "src/server/cron-cli.ts",
       "stop-service": "src/server/stop-service.ts",
       "verify-browser-isolation": "scripts/verify-browser-isolation.ts",

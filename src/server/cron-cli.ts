@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { loadConfig } from "./config";
 import { createAuthToken } from "./auth";
 import { isRemoteCommand, runRemoteCli } from "./remote-cli";
+import { runMaintenanceCli } from "./maintenance-cli";
 
 export const help = `Usage: batty2 [--root /var/lib/batty2] cron ACTION [JOB_ID] [options]
 Actions: add, update, remove, list, get, import, list-running, list-run-logs, stop-running
@@ -19,6 +20,7 @@ get JOB_ID returns full details including prompt.
 add requires --title, --prompt and a schedule.
 Outputs JSON. Uses the running Batty2 service; does not start a scheduler.
 For remote instance provisioning: batty2 remote --help
+For planned downtime: batty2 maintenance --help
 `;
 
 export async function parseCronArgs(args: string[]) {
@@ -99,6 +101,8 @@ export async function parseCronArgs(args: string[]) {
 }
 
 export async function runCronCli(args: string[]) {
+  const command = args.find((arg, index) => !arg.startsWith("-") && args[index - 1] !== "--root");
+  if (command === "maintenance") return runMaintenanceCli(args);
   if (isRemoteCommand(args)) return runRemoteCli(args);
   const input = await parseCronArgs(args);
   if (input.help) {

@@ -8,7 +8,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from artifact_rows import ArtifactRows
+from diff_content_rows import DiffContentRows
 
 KIND = "batty.codemode-tool"
 COLUMNS = "id, conversation_id, kind, status, abort_requested, background, record"
@@ -114,7 +114,7 @@ def candidates(db):
 
 def inventory(db, backup=None):
     protected = protected_tasks(db)
-    artifacts = ArtifactRows(db)
+    artifacts = DiffContentRows(db)
     stats = {"rows": 0, "original_record_bytes": 0, "replacement_record_bytes": 0}
     for row in candidates(db):
         if not eligible(db, row, protected):
@@ -197,7 +197,7 @@ def mutate(target, backup_path, restore=False, chunk_size=1):
             db.execute("BEGIN IMMEDIATE")
             try:
                 protected = protected_tasks(db) if not restore else None
-                artifacts = ArtifactRows(db)
+                artifacts = DiffContentRows(db)
                 for saved in batch:
                     original, changed = saved[:7], saved[7]
                     if artifacts.packed("tasks", saved[0], original[6]):

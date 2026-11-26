@@ -125,7 +125,13 @@ test("agents and viewer share an explicit tab while popups belong only to their 
       for (const client of ["a", "b"])
         expect((await call(client, { action: "snapshot" })).details.pageId).toBe(sharedPopup);
       expect((await service.cloudState(viewer.browserId)).pageId).toBe(sharedPopup);
-      expect((await call("b", { action: "attach" })).details.sites![0]).toMatchObject({
+      const handle = await call("b", { action: "attach" });
+      expect(handle.content).toContainEqual({
+        type: "text",
+        text: expect.stringContaining(`Browser ID: ${viewer.browserId}`),
+      });
+      expect(handle.details).not.toHaveProperty("sites");
+      expect(await service.messageBrowser("shared", viewer.browserId)).toMatchObject({
         browserId: viewer.browserId,
       });
     }

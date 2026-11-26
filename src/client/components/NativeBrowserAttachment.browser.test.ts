@@ -16,6 +16,8 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { loadConfig } from "@/server/config";
+import type { TranscriptContext } from "@earendil-works/pi-ai";
+import { withAttachments } from "@/server/orchestration-test-fixture";
 import { workspaceBrowserKey } from "@/server/browser-service";
 import { Runtime, context } from "@/server/runtime";
 import { registerCloudBrowserRoutes } from "@/server/routes/cloud-browser";
@@ -44,7 +46,21 @@ async function waitForBrowserFrame(page: Page): Promise<void> {
   );
 }
 
-test("main browser tools render a live attachment through native events, reload and reopened durable history", async () => {
+function browserIdFromToolResult(transcript: TranscriptContext, toolCallId: string): string {
+  const result = transcript.messages.find(
+    (message) => message.role === "toolResult" && message.toolCallId === toolCallId,
+  );
+  expect(result).toMatchObject({ role: "toolResult", isError: false });
+  if (result?.role !== "toolResult") throw new Error(`Missing result for ${toolCallId}`);
+  const text = result.content
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("\n");
+  const match = /Browser ID: ([\w-]+)/.exec(text);
+  if (!match) throw new Error(`Missing browser ID in ${toolCallId} result: ${text}`);
+  return match[1]!;
+}
+
+test("explicit browser attachments render through native events, reload and reopened durable history", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-native-browser-"));
   vi.stubEnv("PI_OFFLINE", "1");
   await fs.mkdir(path.join(root, ".batty"));
@@ -59,12 +75,16 @@ test("main browser tools render a live attachment through native events, reload 
     defaultProvider: "faux",
     defaultModel: "browser-artifact-test",
     defaultThinkingLevel: "off" as const,
-    memoryModel: "faux/browser-artifact-test",
+    memoryModel: "faux-memory/summary",
   };
   const faux = fauxProvider({ models: [{ id: "browser-artifact-test" }] });
+  const memory = fauxProvider({ provider: "faux-memory", models: [{ id: "summary" }] });
   const open = () =>
     Runtime.open(config, {
-      beforeStart: (runtime) => runtime.models.registerNativeProvider(faux.provider),
+      beforeStart: (runtime) => {
+        runtime.models.registerNativeProvider(faux.provider);
+        runtime.models.registerNativeProvider(memory.provider);
+      },
     });
   let runtime = await open();
   // Chromium can retain speculative TCP connections without sending a request.
@@ -123,20 +143,53 @@ test("main browser tools render a live attachment through native events, reload 
   await viewer.addCookies([{ name: "cloud-auth", value: "test", url: origin }]);
   const page = await viewer.newPage();
   try {
+    const summarize = () => {
+      memory.appendResponses([summarize]);
+      return fauxAssistantMessage("Browser fixture summary");
+    };
+    memory.setResponses([summarize]);
+    let openedBrowserId: string | undefined;
     faux.setResponses([
       fauxAssistantMessage(
-        [fauxToolCall("browser", { action: "open", url: `${backendUrl}/target`, cloud: true })],
+        [
+          fauxToolCall(
+            "browser",
+            { action: "open", url: `${backendUrl}/target`, cloud: true },
+            { id: "browser-open" },
+          ),
+        ],
         { stopReason: "toolUse" },
       ),
-      fauxAssistantMessage([fauxToolCall("browser", { action: "attach" })], {
-        stopReason: "toolUse",
-      }),
-      fauxAssistantMessage([fauxText("Her")]),
+      (transcript) => {
+        openedBrowserId = browserIdFromToolResult(transcript, "browser-open");
+        return fauxAssistantMessage("Browser ready without attachment");
+      },
       fauxAssistantMessage(
-        [fauxToolCall("codemode", { code: 'text(await tools.browser({ action: "attach" }));' })],
+        [fauxToolCall("browser", { action: "attach" }, { id: "browser-attach" })],
+        {
+          stopReason: "toolUse",
+        },
+      ),
+      (transcript) => {
+        const browserId = browserIdFromToolResult(transcript, "browser-attach");
+        expect(browserId).toBe(openedBrowserId);
+        return fauxAssistantMessage(fauxText(withAttachments("Her", { browserId })));
+      },
+      fauxAssistantMessage(
+        [
+          fauxToolCall(
+            "codemode",
+            { code: 'text(await tools.browser({ action: "attach" }));' },
+            { id: "codemode-browser-attach" },
+          ),
+        ],
         { stopReason: "toolUse" },
       ),
-      fauxAssistantMessage([fauxText("Same browser")]),
+      (transcript) => {
+        const browserId = browserIdFromToolResult(transcript, "codemode-browser-attach");
+        expect(browserId).toBe(openedBrowserId);
+        return fauxAssistantMessage(fauxText(withAttachments("Same browser", { browserId })));
+      },
     ]);
     await page.goto(`${origin}${fixture}`);
     await expect.poll(() => page.locator(".transcript-shell").count()).toBe(1);
@@ -151,8 +204,18 @@ test("main browser tools render a live attachment through native events, reload 
           ? (message.sites ?? []).filter((site) => site.kind === "browser")
           : [],
       );
-    await submit();
     const buttons = page.getByRole("button", { name: "Open browser", exact: true });
+    await submit();
+    await page.getByText("Browser ready without attachment", { exact: true }).waitFor();
+    expect(openedBrowserId).toBeTruthy();
+    expect(await buttons.count()).toBe(0);
+    expect(await sites()).toEqual([]);
+    await submit();
+    expect((await runtime.messages("main")).messages.at(-1)).toMatchObject({
+      role: "assistant",
+      blocks: [{ type: "text", text: "Her" }],
+      sites: [{ browserId: openedBrowserId }],
+    });
     await expect.poll(() => buttons.count()).toBe(1);
     for (const width of [390, 1280, 320]) {
       await page.setViewportSize({ width, height: 844 });

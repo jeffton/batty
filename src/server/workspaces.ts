@@ -174,6 +174,14 @@ export async function createWorkspace(
   );
 }
 
+export async function workspaceForCwd(config: AppConfig, cwd: string): Promise<WorkspaceInfo> {
+  const workspace = (await listWorkspaces(config)).find(
+    (candidate) => cwd === candidate.path || cwd.startsWith(`${candidate.path}${path.sep}`),
+  );
+  if (!workspace) throw new Error(`No Batty workspace contains ${cwd}`);
+  return workspace;
+}
+
 export function resolveWorkspace(workspaces: WorkspaceInfo[], workspaceId: string): WorkspaceInfo {
   const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
   if (!workspace) {

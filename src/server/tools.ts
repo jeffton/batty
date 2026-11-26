@@ -24,7 +24,7 @@ import { withoutAbortSignal } from "@earendil-works/chord/context";
 import type { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import type { AppConfig } from "./config";
 import { stateDirPath } from "./options";
-import { listWorkspaces } from "./workspaces";
+import { workspaceForCwd } from "./workspaces";
 import { BrowserService } from "./browser-service";
 import { closeSharedBrowser } from "./browser-runtime";
 import { SshSocksProxy } from "./ssh-socks-proxy";
@@ -173,10 +173,7 @@ export async function createTools(
       replay,
       execute: async (args, api, ctx) => {
         const cwd = await toolCwd(api, ctx);
-        const workspace = (await listWorkspaces(config)).find(
-          (workspace) => cwd === workspace.path || cwd.startsWith(`${workspace.path}${path.sep}`),
-        );
-        if (!workspace) throw new Error(`No Batty workspace contains ${cwd}`);
+        const workspace = await workspaceForCwd(config, cwd);
         return bridge(
           name,
           () => factory({ config, browserService, workspace: { ...workspace, path: cwd } }),

@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import sqlite3
 
-from artifact_rows import ArtifactRows, fingerprint
+from diff_content_rows import DiffContentRows, fingerprint
 
 # Pi Durable 1.4 / durable schema 2 and Batty's derived indexes. Session documents,
 # record_ids, durable_metadata and all filesystem artifacts are deliberately absent.
@@ -165,7 +165,7 @@ def artifact_identity(table, row):
 
 
 def summarize(db, backup=False, destination=None, artifact_rows=None):
-    artifacts = ArtifactRows(db) if artifact_rows is not None else None
+    artifacts = DiffContentRows(db) if artifact_rows is not None else None
     result = {}
     for table in ORDER:
         digest = hashlib.sha256()
@@ -454,7 +454,7 @@ def mutate(target, backup_path, root, expected, restore=False, quiesced=False):
             for table in reversed(ORDER):
                 db.execute(f"DELETE FROM {quoted(table)} WHERE {condition(table)}")
         else:
-            artifacts = ArtifactRows(db)
+            artifacts = DiffContentRows(db)
             artifact_rows = dict(saved.get("artifact_rows", {}))
             task_ids = [row[0] for row in rows(backup, "tasks", backup=True)]
             document_ids = [row[0] for row in rows(backup, "documents", backup=True)]

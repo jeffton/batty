@@ -8,7 +8,7 @@ def fingerprint(raw):
     return base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest()).decode().rstrip("=")
 
 
-class ArtifactRows:
+class DiffContentRows:
     def __init__(self, db):
         self.db = db
         if db.execute("SELECT 1 FROM sqlite_schema WHERE name='batty_artifact_encoding_v1'").fetchone():

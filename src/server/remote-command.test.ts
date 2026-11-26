@@ -8,7 +8,8 @@ import {
   type ConversationId,
   type Harness,
 } from "@earendil-works/pi-durable";
-import { fixture, until } from "./orchestration-test-fixture";
+import { fileLibraryRef } from "../shared/artifact-library";
+import { fixture, until, withAttachments } from "./orchestration-test-fixture";
 import { orchestrationHistory } from "./orchestration-test-history";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
 
@@ -98,14 +99,37 @@ test("node run is durable and idempotent, rejects changed arguments, and remains
   );
 });
 
-test("remote reports and results persist with artifacts without waking main; inspect and await do not consume them", async () => {
-  const { faux, orchestration, open, registry } = await fixture();
+test("remote reports and results persist only selected files; inspect and await do not consume them or wake main", async () => {
+  const file = (name: string) => ({
+    id: name,
+    name,
+    downloadUrl: `/api/sent-files/test/worker/evidence/${name}`,
+    size: 1,
+    mimeType: "text/plain",
+    kind: "file" as const,
+  });
+  const reportFile = file("progress.txt");
+  const resultFile = file("result.txt");
+  const draft = file("draft.txt");
+  const reportRef = fileLibraryRef(reportFile.id);
+  const resultRef = fileLibraryRef(resultFile.id);
+  const available = new Map(
+    [reportFile, resultFile, draft].map((item) => [fileLibraryRef(item.id), item]),
+  );
+  const { faux, orchestration, open, registry } = await fixture(
+    10_000,
+    console.error,
+    undefined,
+    undefined,
+    async (_, selection) => ({
+      sentFiles: selection.artifactRefs!.map((ref) => available.get(ref)!),
+    }),
+  );
   let entered = false;
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const artifacts = { fileChanges: [{ path: "evidence.txt", patch: "saved evidence" }] };
   registry.install(
     defineExtension({
       name: "remote-report-fixture",
@@ -116,7 +140,7 @@ test("remote reports and results persist with artifacts without waking main; ins
           parameters: Type.Object({}),
           execute: async () => ({
             output: [{ type: "text", text: "evidence collected" }],
-            details: artifacts,
+            details: { sentFiles: [reportFile, resultFile, draft] },
           }),
         }),
         defineTool({
@@ -140,12 +164,20 @@ test("remote reports and results persist with artifacts without waking main; ins
         return fauxAssistantMessage([fauxToolCall("evidence", {})], { stopReason: "toolUse" });
       if (last.role === "toolResult" && last.toolName === "evidence")
         return fauxAssistantMessage(
-          [fauxToolCall("subagent", { action: "report", prompt: "progress evidence" })],
+          [
+            fauxToolCall("subagent", {
+              action: "report",
+              prompt: "progress evidence",
+              artifactRefs: [reportRef],
+            }),
+          ],
           { stopReason: "toolUse" },
         );
       if (last.role === "toolResult" && last.toolName === "subagent")
         return fauxAssistantMessage([fauxToolCall("hold", {})], { stopReason: "toolUse" });
-      return fauxAssistantMessage([fauxText("remote final")]);
+      return fauxAssistantMessage([
+        fauxText(withAttachments("remote final", { artifactRefs: [resultRef] })),
+      ]);
     }),
   );
   const id = sessionId(
@@ -154,61 +186,69 @@ test("remote reports and results persist with artifacts without waking main; ins
       prompt: "report assignment",
     }),
   );
+  const assignment = { grantId: "node-a", requestId: "report-start" };
+  const reportPresentation = { sentFiles: [reportFile] };
+  const resultPresentation = { sentFiles: [resultFile] };
+  const deliveries = async () =>
+    (await entries(harness, id))
+      .filter(
+        (entry) => entry.kind === "batty.remote-report" || entry.kind === "batty.remote-result",
+      )
+      .map(({ data }) => data);
+  let assignmentId: string;
+  const inspect = (requestId: string) =>
+    orchestration.nodeCommand("node-a", requestId, {
+      action: "inspect",
+      sessionId: id,
+    });
   try {
     await until(async () => entered);
-    const before = await entries(harness, id);
-    expect(before.filter((entry) => entry.kind === "batty.remote-report")).toMatchObject([
-      {
-        data: {
-          assignment: { grantId: "node-a", requestId: "report-start" },
-          text: "progress evidence",
-          artifacts,
-        },
-      },
-    ]);
-    for (let i = 0; i < 2; i++) {
-      const inspected = JSON.parse(
-        text(
-          await orchestration.nodeCommand("node-a", `progress-${i}`, {
-            action: "inspect",
-            sessionId: id,
-          }),
-        ),
-      );
-      expect(inspected).toMatchObject({ status: "running", latest: { kind: "report" } });
-      expect(inspected.latest.text).toContain("progress evidence");
-    }
+    const progress = await inspect("progress-first");
+    const { latest } = JSON.parse(text(progress));
+    assignmentId = latest.assignmentId;
+    expect(latest).toEqual({
+      kind: "report",
+      text: "progress evidence",
+      assignmentId,
+      truncated: false,
+    });
+    expect(progress.details).toEqual({ presentation: reportPresentation });
     const waiting = await orchestration.nodeCommand("node-a", "await-running", {
       action: "await",
       sessionId: id,
     });
-    expect(waiting).toMatchObject({ control: { terminate: true } });
+    expect(waiting).toMatchObject({ control: { terminate: true }, details: { assignmentId } });
+    expect(await inspect("progress-after-await")).toEqual(progress);
+    expect(await deliveries()).toEqual([
+      { assignment, assignmentId, text: "progress evidence", presentation: reportPresentation },
+    ]);
     expect((await main.context(context)).messages).toHaveLength(0);
-    expect(
-      (await entries(harness, id)).filter((entry) => entry.kind === "batty.remote-report"),
-    ).toHaveLength(1);
   } finally {
     release();
   }
   await until(async () => (await orchestration.listRunning()).length === 0);
-  const result = (await entries(harness, id)).filter(
-    (entry) => entry.kind === "batty.remote-result",
-  );
-  expect(result).toMatchObject([
+  const done = await orchestration.nodeCommand("node-a", "await-done", {
+    action: "await",
+    sessionId: id,
+  });
+  expect(text(done)).toContain("Subagent finished");
+  expect(done.details).toEqual({ assignmentId });
+  const completed = await inspect("completed-after-await");
+  expect(JSON.parse(text(completed))).toMatchObject({
+    status: "completed",
+    latest: { kind: "result", assignmentId, text: "remote final" },
+  });
+  expect(completed.details).toEqual({ presentation: resultPresentation });
+  expect(await deliveries()).toEqual([
+    { assignment, assignmentId, text: "progress evidence", presentation: reportPresentation },
     {
-      data: {
-        assignment: { grantId: "node-a", requestId: "report-start" },
-        text: "remote final",
-        failed: false,
-        artifacts,
-      },
+      assignment,
+      assignmentId,
+      text: "remote final",
+      failed: false,
+      presentation: resultPresentation,
     },
   ]);
-  expect(
-    text(
-      await orchestration.nodeCommand("node-a", "await-done", { action: "await", sessionId: id }),
-    ),
-  ).toContain("Subagent finished");
   expect((await main.context(context)).messages).toHaveLength(0);
 });
 

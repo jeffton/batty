@@ -110,7 +110,6 @@ async function siteFixture(page: Page, initialSites: SiteDescriptor[], initialRe
 
 test("opens the newest site with no visit history, then uses the most recent visit, including chat opens", async () => {
   const page = await browser.newPage();
-  page.setDefaultTimeout(5000);
   try {
     const state = await siteFixture(page, [], []);
     await page.goto(url);

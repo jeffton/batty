@@ -14,6 +14,7 @@ import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durab
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createTools } from "./tools";
+import { createResources } from "./resources";
 
 export function createToolsTestFixture() {
   const cleanups: Array<() => Promise<void>> = [];
@@ -32,6 +33,7 @@ export function createToolsTestFixture() {
     models.setProvider(faux.provider);
     const registry = createRegistry();
     registry.install(tools.extension);
+    registry.install(createResources(config).extension);
     const settings = {
       get extensions() {
         return registry

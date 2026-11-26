@@ -7,8 +7,6 @@ import { splitHistoryAndTail } from "@/client/lib/transcript-tail";
 import {
   buildToolStateLookup,
   buildTranscriptMessages,
-  isAttachmentOutputToolCall,
-  mergeAttachmentCarrierIntoAssistant,
   toolStatesForMessage,
 } from "@/client/lib/transcript";
 import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
@@ -85,26 +83,7 @@ const rawTranscriptEntries = computed<TranscriptMessageView[]>(() => {
   const entries = [...transcriptMessages.value];
 
   if (activeAssistantMessage.value) {
-    const lastEntry = entries.at(-1);
-    const lastMessage = lastEntry?.message;
-    const attachmentBlocks =
-      lastMessage?.role === "assistant" &&
-      lastMessage.blocks.length > 0 &&
-      lastMessage.blocks.every((block) =>
-        isAttachmentOutputToolCall(block, toolStateLookup.value.toolStatesByCallId),
-      )
-        ? lastMessage.blocks
-        : [];
-
-    if (attachmentBlocks.length > 0) {
-      entries.pop();
-    }
-
-    const message =
-      attachmentBlocks.length > 0
-        ? mergeAttachmentCarrierIntoAssistant(activeAssistantMessage.value, attachmentBlocks)
-        : activeAssistantMessage.value;
-
+    const message = activeAssistantMessage.value;
     entries.push({
       message,
       toolStatesByCallId: toolStatesForMessage(message, toolStateLookup.value.toolStatesByCallId),
@@ -144,15 +123,11 @@ function addTimestampVisibility(entries: TranscriptDisplayEntry[]): TranscriptDi
 }
 
 const transcriptDisplay = computed(() =>
-  buildTranscriptDisplayEntries(
-    rawTranscriptEntries.value,
-    toolStateLookup.value.toolStatesByCallId,
-    {
-      alwaysShowDetails: props.alwaysShowDetails,
-      openDetailsSectionKey: openDetailsSectionKey.value,
-      isStreaming: props.session?.isStreaming,
-    },
-  ),
+  buildTranscriptDisplayEntries(rawTranscriptEntries.value, {
+    alwaysShowDetails: props.alwaysShowDetails,
+    openDetailsSectionKey: openDetailsSectionKey.value,
+    isStreaming: props.session?.isStreaming,
+  }),
 );
 const transcriptEntries = computed<TranscriptDisplayEntry[]>(() =>
   addTimestampVisibility(transcriptDisplay.value.entries),

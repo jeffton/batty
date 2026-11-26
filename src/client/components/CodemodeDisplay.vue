@@ -3,6 +3,8 @@ import { PanelRightOpen } from "@lucide/vue";
 import { computed, ref, useId } from "vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
+import ToolReportAttachments from "@/client/components/ToolReportAttachments.vue";
+import type { MessagePresentation } from "@/server/message-presentation";
 import { createHeadView } from "@/client/lib/tool-output";
 import { subagentSessionId } from "@/client/lib/subagent-session";
 import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
@@ -29,6 +31,7 @@ const codeView = computed(() => createHeadView(props.code.replaceAll("\r", "").t
 const calls = computed(() =>
   (props.details?.calls ?? []).map((call) => {
     let sessionId: string | undefined;
+    let joinedPresentation: MessagePresentation | undefined;
     if (call.name === "subagent") {
       let args: Record<string, unknown> = {};
       try {
@@ -37,8 +40,10 @@ const calls = computed(() =>
         // Invalid tool arguments are displayed too; they contain no usable ID.
       }
       sessionId = subagentSessionId(call.subagent?.sessionId, args);
+      if (call.status === "ok" && args.action === "await")
+        joinedPresentation = call.presentation as MessagePresentation | undefined;
     }
-    return { ...call, sessionId };
+    return { ...call, sessionId, joinedPresentation };
   }),
 );
 const visibleCalls = computed(() => (expanded.value ? calls.value : calls.value.slice(-8)));
@@ -116,6 +121,11 @@ function cost(value: number): string {
           </template>
         </div>
         <div v-if="expanded && call.error" class="codemode-display__error">{{ call.error }}</div>
+        <ToolReportAttachments
+          v-if="call.joinedPresentation"
+          :presentation="call.joinedPresentation"
+          :compact="props.compact"
+        />
       </div>
       <div v-if="pricedCalls.length > 1" class="codemode-display__muted">
         Model calls: {{ cost(totalCost) }}

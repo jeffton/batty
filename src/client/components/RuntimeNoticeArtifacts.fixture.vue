@@ -56,7 +56,7 @@ const messages: UiMessage[] = ["cron", "subagent"].map((kind) => ({
   text: "Report",
   data: {
     runtimeNotice: { text: `${kind} result`, markdown: "Cabin attached. `inline code`" },
-    runtimeResultArtifacts: artifacts,
+    runtimePresentation: artifacts,
     [kind]: { sessionId: "42", runId: kind },
   },
 }));

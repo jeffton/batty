@@ -96,51 +96,8 @@ export function toolStatesForMessage(
   return result;
 }
 
-function hasSentFiles(state: ToolDisplayState | undefined): boolean {
-  return Array.isArray(state?.resultDetails?.sentFiles) && state.resultDetails.sentFiles.length > 0;
-}
-
-function hasSites(state: ToolDisplayState | undefined): boolean {
-  return Array.isArray(state?.resultDetails?.sites) && state.resultDetails.sites.length > 0;
-}
-
-export function isAttachmentOutputToolCall(
-  block: UiContentBlock,
-  toolStatesByCallId: Map<string, ToolDisplayState>,
-): boolean {
-  if (block.type !== "toolCall") {
-    return false;
-  }
-
-  const state = toolStatesByCallId.get(block.id);
-  if (state?.status !== "success") return false;
-  return (
-    (block.name === "attach_files" && hasSentFiles(state)) ||
-    (block.name === "sites" && hasSites(state))
-  );
-}
-
-function attachmentCarrierBlocks(
-  message: UiMessage,
-  toolStatesByCallId: Map<string, ToolDisplayState>,
-): UiContentBlock[] {
-  if (message.role !== "assistant") {
-    return [];
-  }
-
-  return message.blocks.filter((block) => isAttachmentOutputToolCall(block, toolStatesByCallId));
-}
-
-function removeAttachmentCarrierBlocks(
-  message: Extract<UiMessage, { role: "assistant" }>,
-  toolStatesByCallId: Map<string, ToolDisplayState>,
-): Extract<UiMessage, { role: "assistant" }> {
-  return {
-    ...message,
-    blocks: message.blocks.filter(
-      (block) => !isAttachmentOutputToolCall(block, toolStatesByCallId),
-    ),
-  };
+export function hasMessageAttachments(message: Extract<UiMessage, { role: "assistant" }>): boolean {
+  return Boolean(message.sentFiles?.length || message.sites?.length || message.fileChanges?.length);
 }
 
 function assistantHasError(message: Extract<UiMessage, { role: "assistant" }>): boolean {
@@ -163,7 +120,8 @@ function hiddenAssistantErrorIds(messages: UiMessage[], isStreaming: boolean): S
     if (latestErrorId) {
       hiddenIds.add(latestErrorId);
     }
-    latestErrorId = assistantHasError(message) ? message.id : undefined;
+    latestErrorId =
+      assistantHasError(message) && !hasMessageAttachments(message) ? message.id : undefined;
   }
 
   if (isStreaming && latestErrorId) {
@@ -176,70 +134,8 @@ function hiddenAssistantErrorIds(messages: UiMessage[], isStreaming: boolean): S
 function hasRenderableContent(message: Extract<UiMessage, { role: "assistant" }>): boolean {
   return (
     assistantHasError(message) ||
-    (message.fileChanges?.length ?? 0) > 0 ||
-    (message.sentFiles?.length ?? 0) > 0 ||
-    (message.sites?.length ?? 0) > 0 ||
+    hasMessageAttachments(message) ||
     message.blocks.some((block) => block.type !== "thinking" || block.thinking.trim().length > 0)
-  );
-}
-
-function attachmentBlockFromToolResult(
-  message: Extract<UiMessage, { role: "toolResult" }>,
-  toolStatesByCallId: Map<string, ToolDisplayState>,
-): UiContentBlock | undefined {
-  const state: ToolDisplayState = {
-    status: message.isError ? "error" : "success",
-    resultBlocks: message.blocks,
-    resultDetails: message.details,
-  };
-  if (message.toolName === "codemode") {
-    // Aggregate codemode details also contain received worker artifacts. Only
-    // explicit native outputs are carriers; forwarded artifacts are projected
-    // by the server onto their owning assistant message.
-    const calls = message.details?.calls ?? [];
-    const nativeCalls = calls.filter(
-      (call) => call.name === "attach_files" || call.name === "sites",
-    ) as ToolExecutionDetails[];
-    state.resultDetails = {
-      sentFiles: nativeCalls.flatMap((call) => call.sentFiles ?? []),
-      sites: nativeCalls.flatMap((call) => call.sites ?? []),
-    };
-    if (!hasSentFiles(state) && !hasSites(state)) return undefined;
-    const id = `${message.toolCallId}:native-attachments`;
-    toolStatesByCallId.set(id, { ...state, status: "success" });
-    return {
-      type: "toolCall",
-      id,
-      name: hasSentFiles(state) ? "attach_files" : "sites",
-      arguments: {},
-    };
-  }
-  if (state.status !== "success") return undefined;
-  if (hasSentFiles(state) && message.toolName === "attach_files") {
-    return { type: "toolCall", id: message.toolCallId, name: "attach_files", arguments: {} };
-  }
-  if (hasSites(state) && message.toolName === "sites") {
-    return { type: "toolCall", id: message.toolCallId, name: "sites", arguments: {} };
-  }
-  return undefined;
-}
-
-export function mergeAttachmentCarrierIntoAssistant(
-  message: Extract<UiMessage, { role: "assistant" }>,
-  attachmentBlocks: UiContentBlock[],
-): Extract<UiMessage, { role: "assistant" }> {
-  return { ...message, blocks: [...message.blocks, ...attachmentBlocks] };
-}
-
-function acceptsPendingAttachmentBlocks(message: UiMessage): boolean {
-  return (
-    message.role === "assistant" &&
-    !message.directDelivery &&
-    (message.blocks.some(
-      (block) => block.type === "image" || (block.type === "text" && block.text.trim().length > 0),
-    ) ||
-      (message.sentFiles?.length ?? 0) > 0 ||
-      (message.sites?.length ?? 0) > 0)
   );
 }
 
@@ -248,98 +144,28 @@ export function buildTranscriptMessages(
   toolStateLookup: ToolStateLookup,
   isStreaming = false,
 ): TranscriptMessageView[] {
-  const entries: TranscriptMessageView[] = [];
   const hiddenErrorIds = hiddenAssistantErrorIds(messages, isStreaming);
-  let pendingAttachmentBlocks: UiContentBlock[] = [];
-  let pendingAttachmentId = "attachment-carrier";
-  let pendingAttachmentTimestamp = 0;
-
-  for (const message of messages) {
-    if (message.role === "toolResult") {
-      const isReferenced = toolStateLookup.referencedToolCallIds.has(message.toolCallId);
-      const attachmentBlock = attachmentBlockFromToolResult(
-        message,
-        toolStateLookup.toolStatesByCallId,
-      );
-
-      if (attachmentBlock) {
-        if (pendingAttachmentBlocks.length === 0) {
-          pendingAttachmentId = message.id;
-          pendingAttachmentTimestamp = message.timestamp;
-        }
-        pendingAttachmentBlocks = [...pendingAttachmentBlocks, attachmentBlock];
-        continue;
-      }
-
-      if (isReferenced) {
-        continue;
-      }
-    }
-
-    const attachmentBlocks = attachmentCarrierBlocks(message, toolStateLookup.toolStatesByCallId);
-    const messageWithoutAttachmentBlocks =
-      message.role === "assistant" && attachmentBlocks.length > 0
-        ? removeAttachmentCarrierBlocks(message, toolStateLookup.toolStatesByCallId)
-        : message;
-
+  return messages.flatMap((message) => {
     if (
-      messageWithoutAttachmentBlocks.role === "assistant" &&
-      (hiddenErrorIds.has(messageWithoutAttachmentBlocks.id) ||
-        !hasRenderableContent(messageWithoutAttachmentBlocks))
+      (message.role === "toolResult" &&
+        toolStateLookup.referencedToolCallIds.has(message.toolCallId)) ||
+      (message.role === "assistant" &&
+        (hiddenErrorIds.has(message.id) || !hasRenderableContent(message)))
     ) {
-      continue;
+      return [];
     }
-
-    // Notices, user steering and unrelated tool results can interleave with
-    // an ongoing run. Keep its outputs for the next owning assistant response,
-    // matching server metadata projection instead of rendering them twice.
-    const shouldMergePendingAttachments =
-      pendingAttachmentBlocks.length > 0 &&
-      acceptsPendingAttachmentBlocks(messageWithoutAttachmentBlocks);
-    const renderedMessage = shouldMergePendingAttachments
-      ? mergeAttachmentCarrierIntoAssistant(
-          messageWithoutAttachmentBlocks as Extract<UiMessage, { role: "assistant" }>,
-          pendingAttachmentBlocks,
-        )
-      : messageWithoutAttachmentBlocks;
-
-    entries.push({
-      message: renderedMessage,
-      toolStatesByCallId: toolStatesForMessage(renderedMessage, toolStateLookup.toolStatesByCallId),
-    });
-
-    if (shouldMergePendingAttachments) {
-      pendingAttachmentBlocks = [];
-      pendingAttachmentId = "attachment-carrier";
-      pendingAttachmentTimestamp = 0;
-    }
-  }
-
-  if (pendingAttachmentBlocks.length > 0) {
-    const message: Extract<UiMessage, { role: "assistant" }> = {
-      id: `${pendingAttachmentId}:attachments`,
-      role: "assistant",
-      timestamp: pendingAttachmentTimestamp,
-      turnPhase: "final",
-      blocks: pendingAttachmentBlocks,
-    };
-    entries.push({
-      message,
-      toolStatesByCallId: toolStatesForMessage(message, toolStateLookup.toolStatesByCallId),
-    });
-  }
-
-  return entries;
+    return [
+      {
+        message,
+        toolStatesByCallId: toolStatesForMessage(message, toolStateLookup.toolStatesByCallId),
+      },
+    ];
+  });
 }
 
 export function hasToolResultContent(
   blocks: UiContentBlock[],
-  details?: { diff?: string; sentFiles?: unknown[]; sites?: unknown[] },
+  details?: ToolExecutionDetails,
 ): boolean {
-  return (
-    blocks.length > 0 ||
-    typeof details?.diff === "string" ||
-    (Array.isArray(details?.sentFiles) && details.sentFiles.length > 0) ||
-    (Array.isArray(details?.sites) && details.sites.length > 0)
-  );
+  return blocks.length > 0 || typeof details?.diff === "string";
 }

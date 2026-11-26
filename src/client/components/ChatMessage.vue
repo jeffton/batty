@@ -14,7 +14,6 @@ import SharedSitesList from "@/client/components/SharedSitesList.vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
 import TranscriptImage from "@/client/components/TranscriptImage.vue";
-import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
 import { hasNoReplyText } from "@/shared/chat-only-context";
 import type { ToolDisplayState } from "@/client/lib/transcript";
 import type {
@@ -82,23 +81,7 @@ function markdownForBlock(block: UiContentBlock): string | undefined {
 }
 
 function showAssistantBlock(block: UiContentBlock): boolean {
-  return (
-    (block.type !== "text" || block.text.trim().length > 0) &&
-    !isAttachmentOutputToolCall(block, props.toolStatesByCallId)
-  );
-}
-
-function isSentFileDescriptor(candidate: unknown): candidate is SentFileDescriptor {
-  return (
-    !!candidate &&
-    typeof candidate === "object" &&
-    typeof (candidate as SentFileDescriptor).id === "string" &&
-    typeof (candidate as SentFileDescriptor).name === "string" &&
-    typeof (candidate as SentFileDescriptor).size === "number" &&
-    typeof (candidate as SentFileDescriptor).mimeType === "string" &&
-    typeof (candidate as SentFileDescriptor).kind === "string" &&
-    typeof (candidate as SentFileDescriptor).downloadUrl === "string"
-  );
+  return block.type !== "text" || block.text.trim().length > 0;
 }
 
 const assistantSegments = computed<AssistantSegment[]>(() => {
@@ -211,7 +194,7 @@ const replySegmentIndex = computed(() =>
   assistantSegments.value.findIndex((segment) => segment.kind === "reply"),
 );
 
-const lastArtifactSegmentIndex = computed(() =>
+const lastAttachmentSegmentIndex = computed(() =>
   assistantSegments.value.findLastIndex((segment) => segment.kind !== "plain"),
 );
 
@@ -238,9 +221,9 @@ const messageTimestampLabel = computed(() => {
   return date.toLocaleString(locales, { dateStyle: "medium", timeStyle: "short" });
 });
 
-const noticeArtifacts = computed(() =>
+const noticePresentation = computed(() =>
   isRuntimeNotice.value && props.message.role === "custom"
-    ? (props.message.data?.runtimeResultArtifacts as
+    ? (props.message.data?.runtimePresentation as
         | {
             sentFiles?: SentFileDescriptor[];
             sites?: SiteAttachmentDescriptor[];
@@ -251,84 +234,22 @@ const noticeArtifacts = computed(() =>
 );
 
 const attachedFiles = computed<SentFileDescriptor[]>(() => {
+  if (props.message.role === "assistant") return props.message.sentFiles ?? [];
   if (isRuntimeNotice.value && props.message.role === "custom" && props.message.data?.inputFiles)
     return props.message.data.inputFiles as SentFileDescriptor[];
-  if (noticeArtifacts.value) return noticeArtifacts.value.sentFiles ?? [];
-  if (props.message.role !== "assistant") {
-    return [];
-  }
-
-  const files: SentFileDescriptor[] = [...(props.message.sentFiles ?? [])];
-  const seen = new Set(files.map((file) => file.id));
-
-  for (const block of props.message.blocks) {
-    if (block.type !== "toolCall") {
-      continue;
-    }
-
-    if (block.name !== "attach_files") {
-      continue;
-    }
-
-    const candidates = toolStateFor(block.id)?.resultDetails?.sentFiles;
-    if (!Array.isArray(candidates)) {
-      continue;
-    }
-
-    for (const candidate of candidates) {
-      if (!isSentFileDescriptor(candidate) || seen.has(candidate.id)) {
-        continue;
-      }
-
-      seen.add(candidate.id);
-      files.push(candidate);
-    }
-  }
-
-  return files;
+  return noticePresentation.value?.sentFiles ?? [];
 });
-
-function isSiteAttachmentDescriptor(candidate: unknown): candidate is SiteAttachmentDescriptor {
-  return (
-    !!candidate &&
-    typeof candidate === "object" &&
-    typeof (candidate as SiteAttachmentDescriptor).id === "string" &&
-    typeof (candidate as SiteAttachmentDescriptor).name === "string" &&
-    typeof (candidate as SiteAttachmentDescriptor).url === "string" &&
-    (((candidate as SiteAttachmentDescriptor).kind === "site" &&
-      typeof (candidate as SiteAttachmentDescriptor).public === "boolean") ||
-      ((candidate as SiteAttachmentDescriptor).kind === "browser" &&
-        (candidate as { public?: unknown }).public === false &&
-        typeof (candidate as { browserId?: unknown }).browserId === "string"))
-  );
-}
-
-const sharedSites = computed<SiteAttachmentDescriptor[]>(() => {
-  if (noticeArtifacts.value) return noticeArtifacts.value.sites ?? [];
-  if (props.message.role !== "assistant") return [];
-  const sites: SiteAttachmentDescriptor[] = [...(props.message.sites ?? [])];
-  const seen = new Set(sites.map((site) => site.id));
-  for (const block of props.message.blocks) {
-    if (block.type !== "toolCall" || (block.name !== "sites" && block.name !== "attach_files")) {
-      continue;
-    }
-    const candidates = toolStateFor(block.id)?.resultDetails?.sites;
-    if (!Array.isArray(candidates)) continue;
-    for (const candidate of candidates) {
-      if (!isSiteAttachmentDescriptor(candidate) || seen.has(candidate.id)) continue;
-      seen.add(candidate.id);
-      sites.push(candidate);
-    }
-  }
-  return sites;
-});
-
+const sharedSites = computed<SiteAttachmentDescriptor[]>(() =>
+  props.message.role === "assistant"
+    ? (props.message.sites ?? [])
+    : (noticePresentation.value?.sites ?? []),
+);
 const fileChanges = computed(() =>
   props.message.role === "assistant"
     ? (props.message.fileChanges ?? [])
-    : (noticeArtifacts.value?.fileChanges ?? []),
+    : (noticePresentation.value?.fileChanges ?? []),
 );
-const hasReplyArtifacts = computed(
+const hasReplyAttachments = computed(
   () =>
     attachedFiles.value.length > 0 || sharedSites.value.length > 0 || fileChanges.value.length > 0,
 );
@@ -392,7 +313,7 @@ async function copyAssistantMarkdown(): Promise<void> {
             />
           </template>
           <template v-else>{{ props.message.text }}</template>
-          <div v-if="hasReplyArtifacts" class="message__artifacts">
+          <div v-if="hasReplyAttachments" class="message__attachments">
             <AttachedFilesList
               v-if="attachedFiles.length"
               class="message__notice-files"
@@ -527,14 +448,13 @@ async function copyAssistantMarkdown(): Promise<void> {
               :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
               :result-details="toolStateFor(block.id)?.resultDetails"
               :status="toolStateFor(block.id)?.status"
-              :suppress-sent-files="block.name === 'attach_files' || block.name === 'subagent'"
               :allow-session-popovers="props.allowSessionPopovers"
             />
           </template>
 
           <div
-            v-if="hasReplyArtifacts && segmentIndex === lastArtifactSegmentIndex"
-            class="message__artifacts"
+            v-if="hasReplyAttachments && segmentIndex === lastAttachmentSegmentIndex"
+            class="message__attachments"
           >
             <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
             <SharedSitesList
@@ -562,8 +482,8 @@ async function copyAssistantMarkdown(): Promise<void> {
       </template>
 
       <div
-        v-if="hasReplyArtifacts && lastArtifactSegmentIndex < 0"
-        class="message__segment message__segment--bubble message__artifacts"
+        v-if="hasReplyAttachments && lastAttachmentSegmentIndex < 0"
+        class="message__segment message__segment--bubble message__attachments"
       >
         <ReplyActions :copied="copied" @copy="copyAssistantMarkdown">
           <slot name="assistant-actions" />
@@ -595,7 +515,7 @@ async function copyAssistantMarkdown(): Promise<void> {
         <div v-if="props.showTimestamp" class="message__timestamp">{{ messageTimestampLabel }}</div>
         <div class="message__segment message__segment--bubble message__segment--error">
           <ReplyActions
-            v-if="!hasReplyArtifacts && !hasAssistantReplySegment"
+            v-if="!hasReplyAttachments && !hasAssistantReplySegment"
             :copied="copied"
             @copy="copyAssistantMarkdown"
           >
@@ -810,19 +730,19 @@ async function copyAssistantMarkdown(): Promise<void> {
   margin-top: 0.45rem;
 }
 
-.message__artifacts {
+.message__attachments {
   display: grid;
   clear: both;
   gap: 0.6rem;
   margin-top: 0.5rem;
 }
 
-.message__segment.message__artifacts {
+.message__segment.message__attachments {
   display: flow-root;
   margin-top: 0;
 }
 
-.message__segment.message__artifacts > :not(.reply-actions) {
+.message__segment.message__attachments > :not(.reply-actions) {
   margin-top: 0.6rem;
 }
 

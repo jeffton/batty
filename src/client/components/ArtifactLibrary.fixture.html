@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp } from "vue";
+      import { createPinia } from "pinia";
+      import ChatHeader from "./ChatHeader.vue";
+      import { useAppStore } from "../stores/app";
+      import "../styles.css";
+
+      window.__BATTY_BASE_URL__ = "/nested/app";
+      const pinia = createPinia();
+      const store = useAppStore(pinia);
+      Object.assign(store.settings, {
+        pushTitle: "Artifact fixture",
+        memoryModel: "fixture/model",
+        memoryReasoning: "medium",
+        memoryLanguage: "English",
+      });
+      createApp(ChatHeader).use(pinia).mount("#app");
+    </script>
+  </body>
+</html>

@@ -6,7 +6,7 @@ import { defineExtension, section, type ConversationId } from "@earendil-works/p
 import type { AppConfig } from "./config";
 import { stateDirPath } from "./options";
 import { listWorkspaces } from "./workspaces";
-import { ATTACHMENT_DELIVERY_INSTRUCTION } from "./attachment-contract";
+import { ATTACHMENT_DELIVERY_INSTRUCTION } from "./message-presentation";
 
 export function createResources(config: AppConfig) {
   const agentDir = stateDirPath(config.battyDir);

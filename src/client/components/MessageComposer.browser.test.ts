@@ -260,6 +260,7 @@ test("keeps stream controls centered independently of the left and right compose
       const browserButton = header.getByRole("button", { name: "Open browser" });
       const cron = header.getByRole("button", { name: "Cron" });
       const tools = header.getByRole("button", { name: "Workspaces and tools" });
+      const artifacts = header.getByRole("button", { name: "Artifacts", exact: true });
       const usage = header.getByRole("button", { name: "Usage limits" });
       const contextUsage = header.locator(".session-header-status__context");
       const connection = header.locator(".session-header-status__connection");
@@ -267,6 +268,7 @@ test("keeps stream controls centered independently of the left and right compose
         [settings, browserButton],
         [browserButton, cron],
         [cron, tools],
+        [tools, artifacts],
         [usage, contextUsage],
         [contextUsage, connection],
       ] as const) {
@@ -276,7 +278,12 @@ test("keeps stream controls centered independently of the left and right compose
       const connectionBox = (await connection.boundingBox())!;
       expect(settingsX).toBeGreaterThanOrEqual(sideInset + 4);
       expect(connectionBox.x + connectionBox.width).toBeLessThanOrEqual(width - sideInset - 4);
-      expect(await spacing(tools, usage)).toBeGreaterThanOrEqual(0);
+      const artifactsBox = (await artifacts.boundingBox())!;
+      const usageBox = (await usage.boundingBox())!;
+      expect(artifactsBox.x + artifactsBox.width).toBeLessThanOrEqual(width - sideInset - 4);
+      if (usageBox.y === artifactsBox.y)
+        expect(await spacing(artifacts, usage)).toBeGreaterThanOrEqual(0);
+      else expect(usageBox.y).toBeGreaterThanOrEqual(artifactsBox.y + artifactsBox.height);
       expect(active.g!.x).toBeGreaterThanOrEqual(active.t!.x + active.t!.width - 1);
       expect(active.g!.x + active.g!.width).toBeLessThanOrEqual(active.d.x + 1);
       expect(active.g!.x + active.g!.width / 2).toBeCloseTo(width / 2, 0);
@@ -376,7 +383,11 @@ test("keeps stream controls centered independently of the left and right compose
       expect(await spacing(settings, cron)).toBeCloseTo(gap, 0);
       expect(await spacing(contextUsage, connection)).toBeCloseTo(gap, 0);
       expect((await settings.boundingBox())!.x).toBe(settingsX);
-      expect(await connection.boundingBox()).toEqual(connectionBox);
+      const compactConnectionBox = (await connection.boundingBox())!;
+      expect(compactConnectionBox).toEqual({
+        ...connectionBox,
+        y: connectionBox.y + Math.min(0, artifactsBox.y - usageBox.y),
+      });
     } finally {
       await context.close();
     }

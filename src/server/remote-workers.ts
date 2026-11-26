@@ -16,6 +16,7 @@ import type {
   UiMessage,
   RunningSubagent,
   SessionMessagesPage,
+  SentFileDescriptor,
 } from "../shared/types";
 import { RemoteAccess, type RemoteConnectionCredentials } from "./remote-access";
 import { ReverseConnections } from "./reverse-connections";
@@ -25,13 +26,16 @@ import type {
   NodeEvent,
   NodeOperation,
   NodeWorkerSummary,
+  NodePresentation,
+  NodeMessage,
 } from "../shared/node-api";
 import type { Runtime } from "./runtime";
 import type { WorkerCommand, WorkerCommandContext } from "./orchestration-workers";
 import { stateDirPath } from "./options";
 import { encodeRuntimeNotice } from "./runtime-notices";
-import { reportWithArtifacts } from "./artifact-forwarding";
-import type { AgentTurnArtifacts } from "./agent-turn-file-changes";
+import { ArtifactLibrary } from "./artifact-library";
+import { describePresentation } from "./message-presentation";
+import { nodeSessionEvent } from "./remote-presentation";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
 import { storeSentFiles } from "./send-files";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
@@ -136,7 +140,7 @@ export class RemoteWorkers {
   private index: LocalIndex = { assignments: [], origins: {} };
   private writes: Promise<void> = Promise.resolve();
   private readonly running = new Map<string, AbortController>();
-  private readonly importedFiles = new Map<string, Promise<unknown>>();
+  private readonly importedFiles = new Map<string, Promise<SentFileDescriptor>>();
   private readonly loops = new Set<Promise<void>>();
   private stopped = false;
   private constructor(
@@ -253,7 +257,9 @@ export class RemoteWorkers {
         "node.session.watch",
         () => ({ sessionId: mirror.session, after: mirror.after ?? "0" }),
         controller.signal,
-        async (event) => {
+        async (wireEvent) => {
+          const event = nodeSessionEvent(wireEvent, true);
+          if (!event) return;
           if (event.type === "error") throw new Error(String(event.message));
           const taskSignature = this.taskSignature(mirror);
           const activity = JSON.stringify([
@@ -261,7 +267,12 @@ export class RemoteWorkers {
             mirror.state?.canStopSubagent,
           ]);
           if (event.type === "reset") {
-            const state = (await this.importValue(mirror.node, event.state)) as SessionState;
+            const state = {
+              ...event.state,
+              messages: await Promise.all(
+                event.state.messages.map((message) => this.importMessage(mirror.node, message)),
+              ),
+            };
             controller.signal.throwIfAborted();
             const messages = new Map(mirror.messages.map((message) => [message.id, message]));
             for (const message of state.messages) messages.set(message.id, message);
@@ -274,20 +285,11 @@ export class RemoteWorkers {
             controller.signal.throwIfAborted();
             mirror.after = String(Math.max(Number(mirror.after ?? 0), Number(state.historyCursor)));
           } else if (event.type === "state" && mirror.state) {
-            mirror.state = {
-              ...mirror.state,
-              ...((await this.importValue(mirror.node, event.state)) as Partial<SessionState>),
-            };
+            mirror.state = { ...mirror.state, ...event.state };
           } else if (event.type === "assistant" && mirror.state) {
-            mirror.state.activeAssistant = (await this.importValue(
-              mirror.node,
-              event.assistant,
-            )) as SessionState["activeAssistant"];
+            mirror.state.activeAssistant = event.assistant;
           } else if (event.type === "tools" && mirror.state) {
-            mirror.state.activeTools = (await this.importValue(
-              mirror.node,
-              event.tools,
-            )) as SessionState["activeTools"];
+            mirror.state.activeTools = event.tools;
           }
           delete mirror.error;
           const terminal = this.terminalMirrored(mirror);
@@ -575,9 +577,16 @@ export class RemoteWorkers {
           args.files,
           api,
           _ctx,
+          (ref) => new ArtifactLibrary(this.runtime.config).resolveFileSource(ref),
         )
       : [];
-    const { nodeId: _nodeId, files: _files, ...command } = args;
+    const {
+      nodeId: _nodeId,
+      files: _files,
+      artifactRefs: _refs,
+      browserId: _browser,
+      ...command
+    } = args;
     if (parsed) command.sessionId = parsed.session;
     const { action, ...workerInput } = command;
     if (action === "report" || action === "workspaces")
@@ -666,31 +675,20 @@ export class RemoteWorkers {
       if (decoded.workers)
         decoded.workers = decoded.workers.map((worker) => qualifiedWorker(node, worker));
       if (args.action === "inspect") {
-        const details = result.details as
-          | (AgentTurnArtifacts & { referencedArtifacts?: AgentTurnArtifacts })
-          | undefined;
-        const artifacts = (await this.importValue(
-          node,
-          details?.referencedArtifacts ?? details ?? {},
-        )) as AgentTurnArtifacts;
+        const presentation = decoded.latest
+          ? await this.importPresentation(node, result.presentation)
+          : undefined;
         if (decoded.latest)
-          decoded.latest.text = reportWithArtifacts(
-            decoded.latest.text.split(
-              "\n\nExisting response artifacts available for explicit forwarding:",
-            )[0]!,
-            artifacts,
-          );
+          decoded.latest.text = describePresentation(decoded.latest.text, presentation);
         return {
           output: [{ type: "text" as const, text: JSON.stringify(decoded) }],
-          ...(decoded.latest
-            ? { details: { referencedArtifacts: artifacts } as unknown as JsonValue }
-            : {}),
+          ...(presentation ? { details: { presentation } as unknown as JsonValue } : {}),
         };
       }
       output = JSON.stringify(decoded);
     }
     if (args.action === "await") {
-      const assignmentId = (result.details as { assignmentId: string }).assignmentId;
+      const assignmentId = result.details!.assignmentId;
       if (text.startsWith("Awaiting")) {
         await api.commit(async (tx) => {
           const metadata = await tx.doc(WorkerDoc, api.conversationId);
@@ -718,18 +716,15 @@ export class RemoteWorkers {
         output: [
           {
             type: "text" as const,
-            text: reportWithArtifacts(finished.text ?? finished.status, finished.artifacts),
+            text: describePresentation(finished.text ?? finished.status, finished.presentation),
           },
         ],
-        details: finished.artifacts as JsonValue,
+        ...(finished.presentation
+          ? { details: { presentation: finished.presentation } as unknown as JsonValue }
+          : {}),
       };
     }
-    return {
-      output: [{ type: "text" as const, text: output }],
-      ...(result.details
-        ? { details: (await this.importValue(node, result.details)) as JsonValue }
-        : {}),
-    };
+    return { output: [{ type: "text" as const, text: output }] };
   }
   private async assignment(node: string, assignmentId: string, signal?: AbortSignal) {
     const result = await this.nodeRequest(
@@ -738,7 +733,7 @@ export class RemoteWorkers {
       { assignmentId },
       { signal },
     );
-    return (await this.importValue(node, result)) as typeof result;
+    return { ...result, presentation: await this.importPresentation(node, result.presentation) };
   }
   async join(
     input: { node: string; session: string; assignmentId: string; parentId: ConversationId },
@@ -760,7 +755,7 @@ export class RemoteWorkers {
       for (;;) {
         signal.throwIfAborted();
         dirty = false;
-        let result: { status: string; text?: string; artifacts?: AgentTurnArtifacts };
+        let result: NodeOutputs["node.assignment"];
         try {
           result = await this.assignment(input.node, input.assignmentId, signal);
         } catch (error) {
@@ -788,10 +783,10 @@ export class RemoteWorkers {
               requestId: `remote-result:${input.node}:${input.assignmentId}:${input.parentId}`,
               content: encodeRuntimeNotice({
                 kind: "subagent",
-                text: `[subagent ${remoteSessionId(input.node, input.session)} result]\n${reportWithArtifacts(result.text ?? result.status, result.artifacts)}`,
+                text: `[subagent ${remoteSessionId(input.node, input.session)} result]\n${describePresentation(result.text ?? result.status, result.presentation)}`,
                 data: {
                   subagent: { sessionId: remoteSessionId(input.node, input.session) },
-                  ...(result.artifacts ? { runtimeResultArtifacts: result.artifacts } : {}),
+                  ...(result.presentation ? { runtimePresentation: result.presentation } : {}),
                 },
               }),
             },
@@ -822,7 +817,7 @@ export class RemoteWorkers {
       assignment: { requestId: string; grantId: string };
       assignmentId: string;
       text: string;
-      artifacts?: AgentTurnArtifacts;
+      presentation?: NodePresentation;
     };
     const assignment = this.index.assignments.find(
       (item) =>
@@ -847,79 +842,104 @@ export class RemoteWorkers {
             : `remote:${mirror.node}:${mirror.session}:${message.id}`,
         content: encodeRuntimeNotice({
           kind: "subagent",
-          text: `[subagent ${sessionId} ${message.customType === "batty.remote-report" ? "report" : "result"}]\n${reportWithArtifacts(data.text, data.artifacts)}`,
+          text: `[subagent ${sessionId} ${message.customType === "batty.remote-report" ? "report" : "result"}]\n${describePresentation(data.text, data.presentation)}`,
           data: {
             subagent: { sessionId },
-            ...(data.artifacts ? { runtimeResultArtifacts: data.artifacts } : {}),
+            ...(data.presentation ? { runtimePresentation: data.presentation } : {}),
           },
         }),
       },
       context,
     );
   }
-  private async importValue(node: string, value: unknown): Promise<unknown> {
-    return (await this.importTree(node, value)).value;
-  }
-  private async importTree(
-    node: string,
-    value: unknown,
-  ): Promise<{ value: unknown; errors: string[] }> {
-    if (Array.isArray(value)) {
-      const items = await Promise.all(value.map((item) => this.importTree(node, item)));
+  private async importMessage(node: string, message: NodeMessage): Promise<UiMessage> {
+    if (message.role === "assistant") {
+      const { presentation, ...assistant } = message;
+      const imported = await this.importPresentation(node, presentation);
       return {
-        value: items.map((item) => item.value).filter((item) => item !== undefined),
-        errors: items.flatMap((item) => item.errors),
+        ...assistant,
+        sentFiles: imported?.sentFiles,
+        blocks: imported?.importErrors?.length
+          ? [
+              ...assistant.blocks,
+              {
+                type: "text",
+                text: describePresentation("", { importErrors: imported.importErrors }).trim(),
+              },
+            ]
+          : assistant.blocks,
       };
     }
-    if (!value || typeof value !== "object") return { value, errors: [] };
-    const object = value as Record<string, unknown>;
-    if (
-      typeof object.downloadUrl === "string" &&
-      typeof object.name === "string" &&
-      typeof object.id === "string"
-    ) {
-      const key = `${node}:${object.downloadUrl}`;
-      let pending = this.importedFiles.get(key);
-      if (!pending) {
-        pending = this.importFile(node, object);
-        this.importedFiles.set(key, pending);
-      }
-      try {
-        return { value: await pending, errors: [] };
-      } catch (error) {
-        // Keep permanent failures cached. Transient failures may be retried by
-        // later projections, but neither kind can hold an assignment open.
-        if (!(error instanceof PermanentFileImportError)) this.importedFiles.delete(key);
-        return {
-          value: undefined,
-          errors: [`${object.name}: ${String(error)}`],
-        };
-      }
-    }
-    const entries = await Promise.all(
-      Object.entries(object)
-        .filter(([key]) => key !== "sites" && key !== "storedPath")
-        .map(async ([key, item]) => ({ key, ...(await this.importTree(node, item)) })),
+    if (message.role !== "custom" || !message.data) return message;
+    const key = message.customType.startsWith("batty-runtime-notice:")
+      ? "runtimePresentation"
+      : "presentation";
+    const { inputFiles, ...data } = message.data;
+    const presentation = await this.importPresentation(
+      node,
+      data[key] as NodePresentation | undefined,
     );
-    const errors = [...new Set(entries.flatMap((item) => item.errors))];
-    const imported = Object.fromEntries(
-      entries.filter((item) => item.value !== undefined).map((item) => [item.key, item.value]),
-    );
-    if (errors.length && "sentFiles" in object) imported.importErrors = errors;
-    if (object.type === "attachment" && imported.file === undefined)
-      return { value: { type: "text", text: errors.join("\n") }, errors };
-    return { value: imported, errors };
+    const inputs = Array.isArray(inputFiles)
+      ? await this.importPresentation(node, { sentFiles: inputFiles })
+      : undefined;
+    return {
+      ...message,
+      data: {
+        ...data,
+        [key]: presentation,
+        ...(inputs?.sentFiles ? { inputFiles: inputs.sentFiles } : {}),
+        ...(inputs?.importErrors ? { inputFileImportErrors: inputs.importErrors } : {}),
+      },
+    };
   }
-  private async importFile(node: string, object: Record<string, unknown>) {
+
+  private async importPresentation(
+    node: string,
+    presentation?: NodePresentation,
+  ): Promise<NodePresentation | undefined> {
+    if (!presentation) return undefined;
+    const imports = await Promise.all(
+      (presentation.sentFiles ?? []).map((file) => this.importSelectedFile(node, file)),
+    );
+    const sentFiles = imports.flatMap((result) => (result.file ? [result.file] : []));
+    const importErrors = [
+      ...new Set([
+        ...(presentation.importErrors ?? []),
+        ...imports.flatMap((result) => (result.error ? [result.error] : [])),
+      ]),
+    ];
+    return {
+      ...(sentFiles.length ? { sentFiles } : {}),
+      ...(importErrors.length ? { importErrors } : {}),
+    };
+  }
+
+  private async importSelectedFile(node: string, file: SentFileDescriptor) {
+    const key = `${node}:${file.downloadUrl}`;
+    let pending = this.importedFiles.get(key);
+    if (!pending) {
+      pending = this.importFile(node, file);
+      this.importedFiles.set(key, pending);
+    }
+    try {
+      return { file: await pending };
+    } catch (error) {
+      if (!(error instanceof PermanentFileImportError) && this.importedFiles.get(key) === pending)
+        this.importedFiles.delete(key);
+      return { error: `${file.name}: ${String(error)}` };
+    }
+  }
+
+  private async importFile(node: string, file: SentFileDescriptor) {
     const connection = this.connection(node);
     // Reverse peers have no network address. Their manifests contain app-relative paths;
     // the URL only parses the manifest, while bytes travel over the authenticated node route.
     const base = new URL(
       connection.transport === "reverse" ? "http://batty.invalid/" : connection.url!,
     );
-    if (!URL.canParse(String(object.downloadUrl), base))
+    if (!URL.canParse(file.downloadUrl, base))
       throw new PermanentFileImportError("Remote file URL is invalid");
-    const source = new URL(String(object.downloadUrl), base);
+    const source = new URL(file.downloadUrl, base);
     if (source.origin !== base.origin)
       throw new PermanentFileImportError("Remote file URL has a foreign origin");
     const match = /\/api\/sent-files\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(source.pathname);
@@ -948,21 +968,28 @@ export class RemoteWorkers {
       throw new Error(message);
     }
     if (!response.body) throw new Error("Remote file has no byte stream");
-    const directory = path.join(this.directory, "downloads", toolCallId);
-    await fs.mkdir(directory, { recursive: true });
-    const temporary = path.join(directory, path.basename(String(object.name)));
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary, { mode: 0o600 }));
-    const [file] = await storeSentFiles({
-      rootDir: this.runtime.config.sentFilesDir,
-      baseUrl: this.runtime.config.baseUrl,
-      workspaceId: `remote-${node}`,
-      sessionId: match[2]!,
-      toolCallId,
-      cwd: directory,
-      paths: [temporary],
-      reuseExisting: true,
-    });
-    return file;
+    const directory = await fs.mkdtemp(path.join(this.directory, "download-"));
+    try {
+      const temporary = path.join(directory, "attachment");
+      await pipeline(
+        Readable.fromWeb(response.body),
+        createWriteStream(temporary, { mode: 0o600 }),
+      );
+      const [imported] = await storeSentFiles({
+        rootDir: this.runtime.config.sentFilesDir,
+        baseUrl: this.runtime.config.baseUrl,
+        workspaceId: `remote-${node}`,
+        sessionId: match[2]!,
+        toolCallId,
+        cwd: directory,
+        paths: [temporary],
+        names: [response.value.name],
+        reuseExisting: true,
+      });
+      return imported!;
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   }
   private persistMirror(mirror: Mirror) {
     return this.persist(() => this.write(`${mirror.node}-${mirror.session}.json`, mirror));

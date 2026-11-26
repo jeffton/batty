@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Wrench, Clock3, Globe } from "@lucide/vue";
+import { Archive, Wrench, Clock3, Globe } from "@lucide/vue";
 import { nextTick, ref } from "vue";
 import { openCloudBrowser } from "@/client/lib/api";
 import BrowserPopover from "./BrowserPopover.vue";
@@ -9,6 +9,7 @@ import { withBaseUrl } from "@/client/lib/base-url";
 import SettingsPopover from "./SettingsPopover.vue";
 import ToolsPopover from "./ToolsPopover.vue";
 import CronPopover from "./CronPopover.vue";
+import ArtifactLibraryPopover from "./ArtifactLibraryPopover.vue";
 import SessionHeaderStatus from "./SessionHeaderStatus.vue";
 import ProviderUsageIndicator from "./ProviderUsageIndicator.vue";
 const store = useAppStore();
@@ -80,6 +81,15 @@ async function logout() {
       >
         <Wrench :size="17" />
       </button>
+      <button
+        type="button"
+        class="header__button chrome-button chrome-button--icon"
+        popovertarget="artifact-library"
+        aria-label="Artifacts"
+        title="Artifacts"
+      >
+        <Archive :size="17" />
+      </button>
     </div>
     <BrowserPopover
       v-if="cloudBrowser"
@@ -104,6 +114,7 @@ async function logout() {
     />
     <ToolsPopover popover-id="tools-popover" anchor-name="--tools-anchor" />
     <CronPopover popover-id="workers-popover" anchor-name="--workers-anchor" />
+    <ArtifactLibraryPopover popover-id="artifact-library" />
   </header>
 </template>
 <style scoped>
@@ -112,8 +123,8 @@ async function logout() {
   top: 0;
   z-index: 2;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   min-width: 0;
   padding: calc(var(--safe-area-top) + 0.5rem) calc(var(--safe-area-right) + 0.65rem) 0.5rem
     calc(var(--safe-area-left) + 0.65rem);
@@ -125,6 +136,9 @@ async function logout() {
   display: flex;
   align-items: center;
   column-gap: var(--chrome-action-gap);
+}
+.header__controls:last-of-type {
+  margin-inline-start: auto;
 }
 .header__brand img {
   width: 1.6rem;

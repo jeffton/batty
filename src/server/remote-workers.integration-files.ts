@@ -1,7 +1,8 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { artifactRefs } from "./artifact-forwarding";
+import { ArtifactLibrary } from "./artifact-library";
+import type { NodePresentation } from "../shared/node-api";
 import { join } from "node:path";
 import { expect, vi } from "vite-plus/test";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -16,6 +17,8 @@ import {
   connectReverse,
   transcript,
   filesIn,
+  importedRef,
+  withSelectedFiles,
 } from "./remote-workers.integration-fixtures";
 
 export function registerRemoteWorkerFilesTests() {
@@ -32,7 +35,7 @@ export function registerRemoteWorkerFilesTests() {
         const remote = b;
         await connect(local, remote);
         remote.faux.setResponses([
-          fauxAssistantMessage([fauxToolCall("attach_files", { paths: ["origin.txt"] })], {
+          fauxAssistantMessage([fauxToolCall("import_files", { paths: ["origin.txt"] })], {
             stopReason: "toolUse",
           }),
           fauxAssistantMessage(
@@ -44,7 +47,13 @@ export function registerRemoteWorkerFilesTests() {
             ],
             { stopReason: "toolUse" },
           ),
-          fauxAssistantMessage([fauxText("Remote final despite missing attachment")]),
+          (request) =>
+            fauxAssistantMessage([
+              withSelectedFiles(
+                "Remote final despite missing attachment",
+                importedRef(request, "origin.txt"),
+              ),
+            ]),
         ]);
         // A project worker has the same remote coordination access as main.
         await mkdir(join(directory, "a", "project"));
@@ -97,7 +106,7 @@ export function registerRemoteWorkerFilesTests() {
               last?.role === "user" &&
               JSON.stringify(last).includes("Remote final despite missing attachment")
             ) {
-              expect(JSON.stringify(last)).toContain("Remote attachment import failed");
+              expect(JSON.stringify(last)).toContain("Remote file import failed");
               expect(JSON.stringify(last)).toContain(
                 `Remote file ${status === 404 ? "NOT_FOUND" : "INTERNAL"}`,
               );
@@ -148,21 +157,24 @@ export function registerRemoteWorkerFilesTests() {
         // Re-reading terminal assignment receipts retries transient errors, not 404s.
         const requestsBefore = remote.fileRequests.length;
         const mirror = local.runtime.remotes as unknown as {
-          importValue(node: string, value: unknown): Promise<unknown>;
+          importPresentation(node: string, value: NodePresentation): Promise<NodePresentation>;
         };
-        const source = JSON.parse(
-          JSON.stringify((await remote.runtime.state(id.split(":")[2]!)).messages),
+        const terminal = (await remote.runtime.state(id.split(":")[2]!)).messages.findLast(
+          (message) => message.role === "custom" && message.customType === "batty.remote-result",
         );
-        await mirror.importValue(remote.id, source);
-        await mirror.importValue(remote.id, source);
+        const source =
+          terminal?.role === "custom" && (terminal.data?.presentation as NodePresentation);
+        expect(source).toBeTruthy();
+        await mirror.importPresentation(remote.id, source as NodePresentation);
+        await mirror.importPresentation(remote.id, source as NodePresentation);
         expect(remote.fileRequests.length - requestsBefore).toBe(status === 404 ? 0 : 2);
         if (status !== 404) {
           remote.setFileStatus(200);
-          const recovered = await mirror.importValue(remote.id, source);
+          const recovered = await mirror.importPresentation(remote.id, source as NodePresentation);
           expect(filesIn(recovered).some((file) => file.name === "origin.txt")).toBe(true);
           expect(JSON.stringify(recovered)).not.toContain("importErrors");
           const recoveredRequests = remote.fileRequests.length;
-          await mirror.importValue(remote.id, source);
+          await mirror.importPresentation(remote.id, source as NodePresentation);
           expect(remote.fileRequests).toHaveLength(recoveredRequests);
         }
         expect(await transcript(local.runtime)).toContain("Coordinator finished");
@@ -303,7 +315,7 @@ export function registerRemoteWorkerFilesTests() {
             const last = request.messages.findLast((message) => message.role !== "system")!;
             const text = JSON.stringify(last.content);
             if (last.role === "user" && text.includes("seed-parent-ref"))
-              return fauxAssistantMessage([fauxToolCall("attach_files", { paths: [source] })], {
+              return fauxAssistantMessage([fauxToolCall("import_files", { paths: [source] })], {
                 stopReason: "toolUse",
               });
             if (
@@ -389,12 +401,8 @@ export function registerRemoteWorkerFilesTests() {
           ).wait(context);
         };
         await parent("seed-parent-ref");
-        const seeded = (await local.runtime.main.context(context)).messages.findLast(
-          (message) => message.role === "toolResult" && message.toolName === "attach_files",
-        )!;
-        const seedFiles = filesIn(seeded);
-        expect(seedFiles).toHaveLength(1);
-        const ref = artifactRefs({ sentFiles: seedFiles })[0]!.ref;
+        const files = await new ArtifactLibrary(local.config).list();
+        const ref = files.find((file) => file.title === "evidence.txt")!.ref;
         const send = async (action: string, phase: string, useRef = false) => {
           next = {
             action,

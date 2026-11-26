@@ -62,11 +62,8 @@ export const runtimeMessages: UiMessage[] = [
 
 function display(messages: UiMessage[], options = {}) {
   const lookup = buildToolStateLookup(messages, []);
-  return buildTranscriptDisplayEntries(
-    buildTranscriptMessages(messages, lookup, false),
-    lookup.toolStatesByCallId,
-    options,
-  ).entries;
+  return buildTranscriptDisplayEntries(buildTranscriptMessages(messages, lookup, false), options)
+    .entries;
 }
 
 test("an async notice during tool work does not strand the launch in an expanded reply-less section", () => {
@@ -182,29 +179,20 @@ test.each(["cron", "subagent"])(
     const messages: UiMessage[] = [
       { ...runtimeNotice, customType: `batty-runtime-notice:${kind}` },
       runtimeMessages[1]!,
-      {
-        id: "attach-result",
-        role: "toolResult",
-        timestamp: 3,
-        toolCallId: "attachment",
-        toolName: "attach_files",
-        isError: false,
-        blocks: [],
-        details: {
-          sentFiles: [
-            {
-              id: "file",
-              name: "result.txt",
-              size: 1,
-              mimeType: "text/plain",
-              kind: "file",
-              downloadUrl: "/file",
-            },
-          ],
-        },
-      },
       directReply("596412", "Direct result"),
-      runtimeMessages[4]!,
+      {
+        ...(runtimeMessages[4] as Extract<UiMessage, { role: "assistant" }>),
+        sentFiles: [
+          {
+            id: "file",
+            name: "result.txt",
+            size: 1,
+            mimeType: "text/plain",
+            kind: "file",
+            downloadUrl: "/file",
+          },
+        ],
+      },
     ];
     const closed = display(messages);
     const replies = closed
@@ -214,8 +202,8 @@ test.each(["cron", "subagent"])(
       "turn:596412",
       "turn:146870",
     ]);
-    expect(JSON.stringify(replies[0])).not.toContain("attachment");
-    expect(JSON.stringify(replies[1])).toContain("attachment");
+    expect(JSON.stringify(replies[0])).not.toContain("result.txt");
+    expect(JSON.stringify(replies[1])).toContain("result.txt");
     const open = display(messages, { openDetailsSectionKey: "turn:146870" });
     expect(JSON.stringify(open)).toContain("Header spacing task");
     expect(

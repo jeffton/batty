@@ -1,17 +1,33 @@
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
+import { siteLibraryRef } from "@/shared/artifact-library";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { fixture, until } from "./orchestration-test-fixture";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
 
 test("report accepted before tool settlement is delivered once across restart", async () => {
-  const { faux, orchestration, open, registry } = await fixture();
+  const site = {
+    kind: "site" as const,
+    id: "report-replay",
+    name: "Durable progress",
+    url: "/report-replay",
+    public: false as const,
+  };
+  const siteRef = siteLibraryRef(site.id);
+  const resolve = vi.fn(async () => ({ sites: [site] }));
+  const { faux, orchestration, open, registry } = await fixture(
+    10_000,
+    console.error,
+    undefined,
+    undefined,
+    resolve,
+  );
   const subagent = orchestration.extension.tools!.find((tool) => tool.name === "subagent")!;
   const executeReport = subagent.execute as (
-    args: { action: "report"; prompt: string },
+    args: { action: "report"; prompt: string; artifactRefs: string[] },
     api: Parameters<typeof subagent.execute>[1],
     ctx: Parameters<typeof subagent.execute>[2],
   ) => ReturnType<typeof subagent.execute>;
@@ -29,7 +45,7 @@ test("report accepted before tool settlement is delivered once across restart", 
           execute: async (_, api, ctx) => {
             executions++;
             const result = await executeReport(
-              { action: "report", prompt: "durable progress" },
+              { action: "report", prompt: "durable progress", artifactRefs: [siteRef] },
               api,
               ctx,
             );
@@ -70,19 +86,27 @@ test("report accepted before tool settlement is delivered once across restart", 
   await until(async () => delivered);
   const worker = Object.values((await harness.snapshot(OrchestrationDoc, context))!.workers)[0]!;
   const report = (await harness.snapshot(WorkerDoc, worker.id, context))!.latestReport;
-  expect(report?.text).toBe("durable progress");
+  expect(report).toMatchObject({ text: "durable progress", presentation: { sites: [site] } });
   await harness.close(context);
   ({ harness, main } = await open());
   harness.resume();
   await until(async () => (await orchestration.listRunning()).length === 0);
   await main.waitForIdle(context);
   expect(executions).toBe(2);
+  expect(resolve).toHaveBeenCalledExactlyOnceWith(
+    worker.id,
+    expect.objectContaining({ artifactRefs: [siteRef] }),
+  );
   const metadata = (await harness.snapshot(WorkerDoc, worker.id, context))!;
   expect(metadata.latestReport).toEqual(report);
   expect(metadata.latestResultAssignment).toBe(worker.active);
   const notices = (await main.context(context)).messages.flatMap((message) =>
     message.role === "user" ? [decodeRuntimeNotice(message.content)] : [],
   );
-  expect(notices.filter((notice) => notice?.text.includes("durable progress"))).toHaveLength(1);
-  expect(notices.filter((notice) => notice?.text.includes("replay final"))).toHaveLength(1);
+  const progress = notices.filter((notice) => notice?.text.includes("durable progress"));
+  expect(progress).toHaveLength(1);
+  expect(progress[0]?.data?.runtimePresentation).toEqual({ sites: [site] });
+  const finals = notices.filter((notice) => notice?.text.includes("replay final"));
+  expect(finals).toHaveLength(1);
+  expect(finals[0]?.data?.runtimePresentation).toBeUndefined();
 });

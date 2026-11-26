@@ -13,7 +13,10 @@ import {
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { expect, test, vi } from "vite-plus/test";
 import { createDeliveryTask } from "./orchestration-delivery.js";
-import { ArchivedWorker } from "./orchestration-history.js";
+import { ArchivedWorker, DeliveryRecord } from "./orchestration-history.js";
+import { siteLibraryRef } from "@/shared/artifact-library";
+import { presentationHook } from "./presentation-hook";
+import { withAttachments } from "./orchestration-test-fixture";
 import { OrchestrationDoc, WorkerDoc, type OrchestrationServices } from "./orchestration-state.js";
 
 // A retry checkpoint can be persisted after an assignment was already admitted.
@@ -30,7 +33,22 @@ test("batty.delivery retry sleeps across reopen and completes its existing assig
   models.setProvider(faux.provider);
   const registry = createRegistry();
   const prepareAgent = vi.fn(async () => ({}));
+  const site = {
+    kind: "site" as const,
+    id: "retry-site",
+    name: "Original result",
+    url: "/retry-site",
+    public: false as const,
+  };
+  const siteRef = siteLibraryRef(site.id);
+  const resolvePresentation = vi.fn<OrchestrationServices["resolvePresentation"]>(
+    async (_, { artifactRefs }) => {
+      expect(artifactRefs).toEqual([siteRef]);
+      return { sites: [site] };
+    },
+  );
   const services: OrchestrationServices = {
+    resolvePresentation,
     get harness() {
       return harness!;
     },
@@ -41,6 +59,12 @@ test("batty.delivery retry sleeps across reopen and completes its existing assig
     workspace: async () => ({ id: "test", path: directory }),
     assistantWorkspaceId: async () => "test",
   };
+  registry.install(
+    defineExtension({
+      name: "delivery-sleep-presentation",
+      hooks: [presentationHook(services)],
+    }),
+  );
   const Delivery = createDeliveryTask(services);
   const open = async () => {
     harness = await Harness.open(
@@ -104,7 +128,11 @@ test("batty.delivery retry sleeps across reopen and completes its existing assig
     }, context);
     // The delivery definition is not installed yet, so admitting this original
     // input cannot run the delivery before its existing receipt is committed.
-    const answer = vi.fn(() => fauxAssistantMessage([fauxText("assignment completed")]));
+    const answer = vi.fn(() =>
+      fauxAssistantMessage([
+        fauxText(withAttachments("assignment completed", { artifactRefs: [siteRef] })),
+      ]),
+    );
     faux.setResponses([answer]);
     const original = await child.submit(
       {
@@ -175,6 +203,10 @@ test("batty.delivery retry sleeps across reopen and completes its existing assig
       assignmentId: String(deliveryId),
       text: "assignment completed",
       failed: false,
+      presentation: { sites: [site] },
+    });
+    expect(await harness!.snapshot(DeliveryRecord, String(deliveryId), context)).toMatchObject({
+      presentation: { sites: [site] },
     });
     expect(
       await harness!.commit(
@@ -185,6 +217,7 @@ test("batty.delivery retry sleeps across reopen and completes its existing assig
     expect((await resumedChild.agent(context)).cwd).toBe(directory);
     expect(prepareAgent).not.toHaveBeenCalled();
     expect(answer).toHaveBeenCalledTimes(1);
+    expect(resolvePresentation).toHaveBeenCalledTimes(1);
   } finally {
     await harness?.close(context);
     await rm(directory, { recursive: true, force: true });

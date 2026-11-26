@@ -15,6 +15,8 @@ import {
   connectReverse,
   transcript,
   filesIn,
+  importedRef,
+  withSelectedFiles,
 } from "./remote-workers.integration-fixtures";
 
 export function registerRemoteWorkerPairingTests() {
@@ -110,10 +112,13 @@ export function registerRemoteWorkerPairingTests() {
           [mac, windows],
         ] as const) {
           to.faux.setResponses([
-            fauxAssistantMessage([fauxToolCall("attach_files", { paths: ["origin.txt"] })], {
+            fauxAssistantMessage([fauxToolCall("import_files", { paths: ["origin.txt"] })], {
               stopReason: "toolUse",
             }),
-            fauxAssistantMessage([fauxText(`executed on ${to.id}`)]),
+            (request) =>
+              fauxAssistantMessage([
+                withSelectedFiles(`executed on ${to.id}`, importedRef(request, "origin.txt")),
+              ]),
           ]);
           const started = await nodeRequest<{ output: Array<{ text: string }> }>(
             from.runtime.remotes.connection(to.id),

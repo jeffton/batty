@@ -13,7 +13,6 @@ import { BrowserService } from "./browser-service";
 import { createOwnerRpcHandler, type OwnerRpcServices } from "./owner-rpc";
 import type { Runtime } from "./runtime";
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
-import { artifactRefs, mergeResponseArtifacts } from "./artifact-forwarding";
 
 vi.mock("./cloud-browser-stream", () => ({
   CloudBrowserStreams: class {
@@ -223,28 +222,31 @@ test("cloud attachment shares agent state and controls, survives detach, and can
   const f = await fixture();
   let service = f.service;
   try {
-    await service.execute("shared", { action: "open", url: f.url });
-    await expect(service.execute("shared", { action: "attach" })).rejects.toThrow("cloud=true");
-    const attached = await service.execute("shared", { action: "attach", cloud: true });
+    await service.execute("workspace:shared", { action: "open", url: f.url });
+    await expect(service.execute("workspace:shared", { action: "attach" })).rejects.toThrow(
+      "cloud=true",
+    );
+    const attached = await service.execute("workspace:shared", { action: "attach", cloud: true });
     const site = attached.details.sites![0]!;
     const id = site.browserId!;
     expect(site.public).toBe(false);
-    expect((await service.execute("shared", { action: "attach" })).details.sites).toEqual([site]);
-    // Existing generic artifacts keep the live handle intact when forwarded.
-    const forwarded = mergeResponseArtifacts({ sites: [site] }).sites![0]!;
-    expect(forwarded.kind === "browser" && forwarded.browserId).toBe(id);
-    expect(artifactRefs({ sites: [site] })[0]!.ref).toMatch(/^browser:/);
+    expect((await service.execute("workspace:shared", { action: "attach" })).details.sites).toEqual(
+      [site],
+    );
+    expect(await service.messageBrowser("shared", id)).toEqual(site);
+    await expect(service.messageBrowser("other", id)).rejects.toThrow("different workspace");
     let state = await service.cloudState(id);
     await service.cloudControl(id, { action: "click", ...state, x: 40, y: 30 });
     expect(
-      (await service.execute("shared", { action: "evaluate", script: "window.clicks" })).text,
+      (await service.execute("workspace:shared", { action: "evaluate", script: "window.clicks" }))
+        .text,
     ).toContain("1");
-    await service.execute("shared", { action: "click", selector: "#text" });
+    await service.execute("workspace:shared", { action: "click", selector: "#text" });
     state = await service.cloudState(id);
     await service.cloudControl(id, { action: "text", ...state, text: "iPhone æøå" });
     expect(
       (
-        await service.execute("shared", {
+        await service.execute("workspace:shared", {
           action: "evaluate",
           script: "document.querySelector('#text').value",
         })
@@ -281,13 +283,13 @@ test("cloud attachment shares agent state and controls, survives detach, and can
     ).rejects.toThrow("focused field changed");
     await target.page.locator("#text").click();
     const beforeFocusChange = await service.cloudState(id);
-    await service.execute("shared", { action: "click", selector: "#other" });
+    await service.execute("workspace:shared", { action: "click", selector: "#other" });
     await expect(
       service.cloudControl(id, { action: "text", ...beforeFocusChange, text: "wrong field" }),
     ).rejects.toThrow("view changed");
     expect(
       (
-        await service.execute("shared", {
+        await service.execute("workspace:shared", {
           action: "evaluate",
           script: "document.querySelector('#other').value",
         })
@@ -318,17 +320,22 @@ test("cloud attachment shares agent state and controls, survives detach, and can
     });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(
-      (await service.execute("shared", { action: "evaluate", script: "window.scrollY" })).text,
+      (await service.execute("workspace:shared", { action: "evaluate", script: "window.scrollY" }))
+        .text,
     ).not.toContain("result:\n0");
-    const second = await service.execute("shared", { action: "open", url: f.url, newPage: true });
+    const second = await service.execute("workspace:shared", {
+      action: "open",
+      url: f.url,
+      newPage: true,
+    });
     await expect(
       service.cloudControl(id, { action: "text", ...state, text: "stale" }),
     ).rejects.toThrow("view changed");
     await service.cloudControl(id, { action: "switch", pageId: state.pageId });
     expect((await service.cloudState(id)).pages).toHaveLength(2);
     await service.cloudControl(id, { action: "close-page", pageId: second.details.pageId! });
-    await service.execute("shared", { action: "switch", pageId: state.pageId });
-    const busy = service.execute("shared", {
+    await service.execute("workspace:shared", { action: "switch", pageId: state.pageId });
+    const busy = service.execute("workspace:shared", {
       action: "evaluate",
       script: "new Promise(resolve => setTimeout(resolve, 200))",
     });
@@ -339,21 +346,22 @@ test("cloud attachment shares agent state and controls, survives detach, and can
     expect((await service.cloudState(id)).pageId).toBe(state.pageId);
     expect(
       (
-        await service.execute("shared", {
+        await service.execute("workspace:shared", {
           action: "evaluate",
           script: "document.querySelector('#text').value",
         })
       ).text,
     ).toContain("iPhone æøå");
-    await service.execute("shared", { action: "close" });
+    await service.execute("workspace:shared", { action: "close" });
     await expect(service.cloudState(id)).rejects.toThrow("session ended");
-    await service.execute("shared", { action: "open", url: f.url, cloud: true });
+    await service.execute("workspace:shared", { action: "open", url: f.url, cloud: true });
     expect(
-      (await service.execute("shared", { action: "attach" })).details.sites![0]!.browserId,
+      (await service.execute("workspace:shared", { action: "attach" })).details.sites![0]!
+        .browserId,
     ).not.toBe(id);
     await expect(service.cloudState(id)).rejects.toThrow("session ended");
   } finally {
-    await service.closeSession("shared");
+    await service.closeSession("workspace:shared");
     await service.dispose();
     await f.close();
   }

@@ -1,29 +1,21 @@
-import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
-import type { ToolDisplayState } from "@/client/lib/transcript";
+import { hasMessageAttachments } from "@/client/lib/transcript";
 import { chatOnlyBlocks } from "@/shared/chat-only-context";
 import type { UiMessage } from "@/shared/types";
 
-export function easyModeMessage(
-  message: UiMessage,
-  toolStatesByCallId: Map<string, ToolDisplayState> = new Map(),
-): UiMessage | undefined {
+export function easyModeMessage(message: UiMessage): UiMessage | undefined {
   if (message.role === "user") {
     return chatOnlyBlocks(message.role, message.blocks) ? message : undefined;
   }
   if (message.role !== "assistant") return undefined;
 
-  const blocks = chatOnlyBlocks(message.role, message.blocks, (block) =>
-    isAttachmentOutputToolCall(block, toolStatesByCallId),
-  );
+  const blocks = chatOnlyBlocks(message.role, message.blocks);
   const next: Extract<UiMessage, { role: "assistant" }> = {
     ...message,
     blocks: blocks ?? [],
   };
   if (
     !blocks &&
-    (next.fileChanges?.length ?? 0) === 0 &&
-    (next.sentFiles?.length ?? 0) === 0 &&
-    (next.sites?.length ?? 0) === 0 &&
+    !hasMessageAttachments(next) &&
     !next.errorMessage &&
     next.stopReason !== "error"
   ) {

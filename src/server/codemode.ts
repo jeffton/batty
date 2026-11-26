@@ -341,21 +341,7 @@ export function createCodemodeTool(
         });
         const effects = (key: string) =>
           calls.flatMap((call) => (Array.isArray(call[key]) ? (call[key] as JsonValue[]) : []));
-        const sentFiles = effects("sentFiles");
-        const sites = effects("sites");
         const battyFileChanges = effects("battyFileChanges");
-        const fileChanges = effects("fileChanges");
-        const forwarded = calls.flatMap((call) =>
-          call.forwardedArtifacts
-            ? [
-                call.forwardedArtifacts as {
-                  fileChanges?: JsonValue[];
-                  sites?: JsonValue[];
-                  sentFiles?: JsonValue[];
-                },
-              ]
-            : [],
-        );
         return {
           output: limited,
           isError: !result.ok,
@@ -370,19 +356,7 @@ export function createCodemodeTool(
                   mainMemoryFreeContent: limited.filter((_, index) => safeBlocks[index]),
                 }
               : {}),
-            ...(sentFiles.length ? { sentFiles } : {}),
-            ...(sites.length ? { sites } : {}),
             ...(battyFileChanges.length ? { battyFileChanges } : {}),
-            ...(fileChanges.length ? { fileChanges } : {}),
-            ...(forwarded.length
-              ? {
-                  forwardedArtifacts: {
-                    fileChanges: forwarded.flatMap((artifacts) => artifacts.fileChanges ?? []),
-                    sites: forwarded.flatMap((artifacts) => artifacts.sites ?? []),
-                    sentFiles: forwarded.flatMap((artifacts) => artifacts.sentFiles ?? []),
-                  },
-                }
-              : {}),
           } as unknown as JsonValue,
           ...(control ? { control } : {}),
         };

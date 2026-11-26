@@ -100,6 +100,7 @@ function onToggle(event: Event): void {
     @toggle="onToggle"
   >
     <template #header-actions>
+      <slot name="header-actions" />
       <button
         type="button"
         class="chrome-button chrome-button--icon"

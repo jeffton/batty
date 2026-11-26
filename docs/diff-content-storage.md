@@ -9,10 +9,10 @@ The online SQLite backup API includes the content store. Worker-tree before-imag
 Use the Batty checkout corresponding to the deployed binary:
 
 ```sh
-pnpm exec tsx scripts/artifact-dedup.ts plan /private/verified-snapshot/runtime.sqlite
-pnpm exec tsx scripts/artifact-dedup.ts apply /path/to/runtime.sqlite
+pnpm exec tsx scripts/diff-content-dedup.ts plan /private/verified-snapshot/runtime.sqlite
+pnpm exec tsx scripts/diff-content-dedup.ts apply /path/to/runtime.sqlite
 ```
 
 Take and verify a consistent backup first. `plan` opens its input read-only and reports candidate rows and byte estimates before SQLite overhead. `apply` requires the artifact-aware runtime with writes enabled. It updates rows in place, verifies each row round trips, and can be repeated after interruption. It leaves freed pages for SQLite to reuse; it does not run `VACUUM`.
 
-For a binary rollback, while the artifact-aware runtime is still deployed, run `pnpm exec tsx scripts/artifact-dedup.ts inline /path/to/runtime.sqlite`. This disables packed writes in SQLite, re-inlines artifacts including writes since deployment, and verifies that no packed rows remain. Restart with the older binary only after a successful inverse. Never restore the old backup over a database with newer history. Keep the immutable store for existing worker-tree before-images. After deploying the artifact-aware binary again, `pnpm exec tsx scripts/artifact-dedup.ts enable /path/to/runtime.sqlite` enables packing.
+For a binary rollback, while the artifact-aware runtime is still deployed, run `pnpm exec tsx scripts/diff-content-dedup.ts inline /path/to/runtime.sqlite`. This disables packed writes in SQLite, re-inlines artifacts including writes since deployment, and verifies that no packed rows remain. Restart with the older binary only after a successful inverse. Never restore the old backup over a database with newer history. Keep the immutable store for existing worker-tree before-images. After deploying the artifact-aware binary again, `pnpm exec tsx scripts/diff-content-dedup.ts enable /path/to/runtime.sqlite` enables packing.

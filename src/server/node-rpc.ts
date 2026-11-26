@@ -2,7 +2,8 @@ import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import type { TaskId } from "@earendil-works/pi-durable";
 import { RpcError, rpcRegistry, type RpcHandler, type RpcReply } from "../shared/rpc";
-import type { NodeInputs, NodeOutputs, NodeEvents } from "../shared/node-api";
+import type { NodeInputs, NodeOutputs, NodeEvents, NodePresentation } from "../shared/node-api";
+import { exportNodePresentation, exportNodeSessionEvent } from "./remote-presentation";
 export type { NodeCommandInput } from "../shared/node-api";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import type { RemoteWorkers, RemoteWorkerSummary } from "./remote-workers";
@@ -136,8 +137,26 @@ export function createNodeRpcHandler(
       } else if (call.body) throw new RpcError("BAD_INPUT", "Unexpected worker file body");
       call.signal.throwIfAborted();
       authorizeNode(remotes, connection);
+      const result = await runtime.orchestration.nodeCommand(
+        grantId,
+        body.requestId,
+        command,
+        files,
+      );
+      const { details, ...reply } = result;
+      if (command.action === "inspect") {
+        const presentation = await exportNodePresentation(
+          runtime.config,
+          (details as { presentation?: NodePresentation } | undefined)?.presentation,
+        );
+        return { value: { ...reply, presentation } };
+      }
+      const assignmentId =
+        command.action === "await"
+          ? (details as { assignmentId?: string } | undefined)?.assignmentId
+          : undefined;
       return {
-        value: await runtime.orchestration.nodeCommand(grantId, body.requestId, command, files),
+        value: { ...reply, ...(assignmentId !== undefined ? { details: { assignmentId } } : {}) },
       };
     },
     { body: true },
@@ -161,7 +180,10 @@ export function createNodeRpcHandler(
                   : task.state.outcome.result,
           }
         : {}),
-      artifacts: (await runtime.harness.snapshot(DeliveryRecord, assignmentId, context))?.artifacts,
+      presentation: await exportNodePresentation(
+        runtime.config,
+        (await runtime.harness.snapshot(DeliveryRecord, assignmentId, context))?.presentation,
+      ),
     };
   });
   registry.streaming("node.file", async (input, call) => {
@@ -279,8 +301,10 @@ export function createNodeRpcHandler(
           after,
           async (event) => {
             if (signal.aborted) return;
+            const projected = await exportNodeSessionEvent(runtime.config, event);
+            if (!projected || signal.aborted) return;
             authorizeNode(remotes, connection);
-            await emit(event);
+            await emit(projected);
           },
           signal,
           (error) => {

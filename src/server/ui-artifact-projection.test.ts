@@ -1,12 +1,9 @@
 import { expect, test } from "vite-plus/test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { EntryRecord } from "@earendil-works/pi-durable";
 import type { SessionState, UiMessage } from "@/shared/types";
 import { normalizeMessage } from "./pi-state";
 import { TranscriptImages } from "./transcript-images";
-import { runtimeResultArtifacts } from "./runtime-result-artifacts";
 import { encodeRuntimeNotice } from "./runtime-notices";
-import { artifactRefs } from "./artifact-forwarding";
 
 const snapshot = {
   path: "a.ts",
@@ -59,20 +56,17 @@ function expectVisible(value: unknown) {
   expect(serialized).toContain(site.url);
 }
 
-test("notice/tool projection excludes internal snapshots without changing durable aggregation or immutable refs", () => {
+test("notice/tool projection excludes internal snapshots without mutating durable payloads", () => {
   const content = encodeRuntimeNotice({
     kind: "subagent",
     text: "Ready",
     data: {
-      runtimeResultArtifacts: artifacts,
+      runtimePresentation: artifacts,
       subagent: { sessionId: "42" },
       runtimeNotice: { markdown: "Ready" },
       customMetric: 42,
     },
   });
-  const entries = [{ model: [{ role: "user", content }] }] as unknown as EntryRecord[];
-  const original = JSON.stringify(entries);
-  const before = runtimeResultArtifacts(entries);
   const notice = normalizeMessage({ role: "user", content, timestamp: 1 }, 0);
   expectVisible(notice);
   expect(notice).toMatchObject({
@@ -97,13 +91,6 @@ test("notice/tool projection excludes internal snapshots without changing durabl
       calls: [{ arguments: { battyFileChanges: "user argument" } }],
     },
   });
-  expect(JSON.stringify(entries)).toBe(original);
-  expect(runtimeResultArtifacts(entries)).toEqual(before);
-  expect(before.battyFileChanges).toEqual([snapshot]);
-  expect(before.forwardedArtifacts).toEqual({ fileChanges: [patch] });
-  expect(artifactRefs(before)).toContainEqual(
-    expect.objectContaining({ kind: "diff", value: patch }),
-  );
   expect(details.calls[0]!.details.battyFileChanges).toEqual([snapshot]);
 });
 
@@ -171,7 +158,7 @@ test("session event projection sanitizes already-attached remote history and act
       customType: "batty-runtime-notice:subagent",
       timestamp: 1,
       text: "Ready",
-      data: { runtimeResultArtifacts: artifacts, other: "kept" },
+      data: { runtimePresentation: artifacts, other: "kept" },
     },
     {
       id: "2",

@@ -23,7 +23,7 @@ import {
   type LiveState,
   type InboxState,
 } from "@earendil-works/pi-durable";
-import { openArtifactSqliteDatabase } from "./artifact-sqlite";
+import { openDiffContentSqliteDatabase } from "./diff-content-sqlite";
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -33,8 +33,12 @@ import { stateDirPath } from "./options";
 import { enableCodemodeAdapters } from "./codemode-native";
 import { listWorkspaces } from "./workspaces";
 import { normalizeMessage, normalizeBlocks } from "./pi-state";
-import { hydrateRuntimeResultArtifacts } from "./runtime-result-artifacts-history";
-import { responseArtifacts, mergeResponseArtifacts } from "./artifact-forwarding";
+import { ArtifactLibrary } from "./artifact-library";
+import { resolvePresentation } from "./message-presentation";
+import {
+  assertArtifactPresentationReady,
+  markNewArtifactPresentationDatabase,
+} from "./artifact-presentation-migration";
 import { queuedPromptDisplay } from "./queued-prompt-display";
 import { projectRuntimeNoticeRequest } from "./runtime-notices";
 import { projectProviderImages } from "./provider-images";
@@ -144,7 +148,18 @@ export class Runtime {
     });
     const registry = createRegistry();
     const tools = await createTools(config);
-    const orchestration = createOrchestration(config, networkAvailable);
+    const artifactLibrary = new ArtifactLibrary(config);
+    const orchestration = createOrchestration(config, networkAvailable, {
+      resolvePresentation: (conversationId, selection) =>
+        resolvePresentation(artifactLibrary, selection, async (id) => {
+          const workspaceId =
+            (await orchestration.metadata(conversationId))?.workspaceId ??
+            (await listWorkspaces(config)).find((workspace) => workspace.isAssistant)?.id;
+          if (!workspaceId) throw new Error("No browser workspace");
+          return tools.browserService.messageBrowser(workspaceId, id);
+        }),
+      resolveFileSource: (ref) => artifactLibrary.resolveFileSource(ref),
+    });
     const memory = createMemory(
       {
         noiseBackupDir: path.join(dir, "memory-backups"),
@@ -167,9 +182,11 @@ export class Runtime {
     registry.install(resources.extension);
     const baseExtensions = registry.snapshot().installed();
     const workspaces = await listWorkspaces(config);
-    const database = await openArtifactSqliteDatabase(path.join(dir, "runtime.sqlite"));
+    const database = await openDiffContentSqliteDatabase(path.join(dir, "runtime.sqlite"));
     const storage = await SqliteStorage.open(database);
-    database.enableArtifactWrites();
+    database.enableDiffContentWrites();
+    await markNewArtifactPresentationDatabase(database);
+    await assertArtifactPresentationReady(database);
     const historyIndex = await createHistoryIndex(database);
     const harness = await Harness.open(
       storage,
@@ -381,6 +398,7 @@ export class Runtime {
       ? normalizeMessage(
           live.generation.message as unknown as AgentMessage,
           Number.MAX_SAFE_INTEGER,
+          { streamingAssistant: true },
         )
       : undefined;
     const failure = live?.runFailure;
@@ -474,30 +492,6 @@ export class Runtime {
   ) {
     const page = await this.historyIndex.entries(conversationId, before, limit, after, maximum);
     const messages = entryMessages(page.entries);
-    await Promise.all(
-      messages.map(async (message) => {
-        await hydrateRuntimeResultArtifacts(this.storage, conversationId, message);
-        if (
-          message.role === "assistant" &&
-          !message.directDelivery &&
-          message.blocks.some(
-            (block) =>
-              block.type === "image" || (block.type === "text" && block.text.trim() !== ""),
-          )
-        ) {
-          const entries = await this.historyIndex.responseArtifacts(
-            conversationId,
-            Number(message.id.split(":")[0]),
-          );
-          if (entries.length) {
-            const artifacts = mergeResponseArtifacts(message, responseArtifacts(entries));
-            message.fileChanges = artifacts.fileChanges;
-            message.sites = artifacts.sites;
-            message.sentFiles = artifacts.sentFiles;
-          }
-        }
-      }),
-    );
     return { messages, hasMoreMessages: page.hasMoreMessages, nextBefore: page.nextBefore };
   }
 

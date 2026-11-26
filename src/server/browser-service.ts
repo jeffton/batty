@@ -466,6 +466,10 @@ export class BrowserService {
     return this.viewer.cloudVideoGeometry(...args);
   }
 
+  messageBrowser(workspaceId: string, browserId: string) {
+    return this.viewer.messageBrowser(workspaceBrowserKey(workspaceId), browserId);
+  }
+
   cloudState(...args: Parameters<BrowserViewer["cloudState"]>) {
     return this.viewer.cloudState(...args);
   }

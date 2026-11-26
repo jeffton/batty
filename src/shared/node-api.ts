@@ -1,17 +1,43 @@
 import type { JsonValue } from "@earendil-works/chord/json";
 import type { WorkerCommand } from "../server/orchestration-workers";
 import type { WorkerFileMetadata } from "../server/worker-files";
-import type { AgentTurnArtifacts } from "../server/agent-turn-file-changes";
 import type { RemoteDiscovery } from "./remotes";
-import type { SentFileDescriptor, ServerEvent } from "./types";
+import type {
+  SentFileDescriptor,
+  ServerEvent,
+  SessionState,
+  UiAssistantMessage,
+  UiMessage,
+} from "./types";
 
 export type NodeCommandInput = {
   requestId: string;
-  command: Omit<WorkerCommand, "files" | "nodeId" | "action"> & {
+  command: Omit<WorkerCommand, "files" | "nodeId" | "action" | "artifactRefs" | "browserId"> & {
     action: Exclude<WorkerCommand["action"], "report" | "workspaces">;
   };
   files?: WorkerFileMetadata[];
 };
+
+export type NodeFile = Omit<SentFileDescriptor, "storedPath">;
+export type NodePresentation = { sentFiles?: NodeFile[]; importErrors?: string[] };
+
+export type NodeAssistantMessage = Omit<
+  UiAssistantMessage,
+  "sentFiles" | "sites" | "fileChanges" | "historicalPresentation"
+> & { presentation?: NodePresentation };
+export type NodeMessage = Exclude<UiMessage, UiAssistantMessage> | NodeAssistantMessage;
+
+export type NodeSessionEvent =
+  | Extract<ServerEvent, { type: "state" | "tools" | "error" }>
+  | (Omit<Extract<ServerEvent, { type: "reset" }>, "state"> & {
+      state: Omit<SessionState, "messages" | "activeAssistant"> & {
+        messages: NodeMessage[];
+        activeAssistant?: NodeAssistantMessage;
+      };
+    })
+  | (Omit<Extract<ServerEvent, { type: "assistant" }>, "assistant"> & {
+      assistant?: NodeAssistantMessage;
+    });
 
 export type NodeWorkerSummary = {
   sessionId: string;
@@ -40,19 +66,20 @@ export interface NodeOutputs {
   "node.unpair": { ok: true };
   "node.command": {
     output?: JsonValue;
-    details?: JsonValue;
+    details?: { assignmentId: string };
     control?: JsonValue;
     isError?: boolean;
+    presentation?: NodePresentation;
   };
-  "node.assignment": { status: string; text?: string; artifacts?: AgentTurnArtifacts };
-  "node.file": SentFileDescriptor;
+  "node.assignment": { status: string; text?: string; presentation?: NodePresentation };
+  "node.file": NodeFile;
   "node.catalog.watch": null;
   "node.session.watch": null;
 }
 
 export interface NodeEvents {
   "node.catalog.watch": { workers: NodeWorkerSummary[] };
-  "node.session.watch": ServerEvent;
+  "node.session.watch": NodeSessionEvent;
 }
 
 export type NodeOperation = keyof NodeInputs;

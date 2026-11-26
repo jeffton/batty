@@ -30,7 +30,7 @@ function views(messages: UiMessage[]): TranscriptMessageView[] {
   return messages.map((message) => ({ message, toolStatesByCallId: tools }));
 }
 function display(messages: UiMessage[], options = {}) {
-  return buildTranscriptDisplayEntries(views(messages), tools, options).entries;
+  return buildTranscriptDisplayEntries(views(messages), options).entries;
 }
 
 test("finished and persisted sections collapse, with one section control on the last reply", () => {

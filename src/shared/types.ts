@@ -83,6 +83,7 @@ export interface UiAssistantMessage {
   turnPhase: UiAssistantTurnPhase;
   runTaskId?: string;
   directDelivery?: { sessionId: string; runId: string };
+  historicalPresentation?: true;
   blocks: UiContentBlock[];
   model?: string;
   provider?: string;

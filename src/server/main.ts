@@ -10,21 +10,24 @@ import { loadConfig, resolveBattyDir } from "./config";
 import { stateDirPath } from "./options";
 import { listWorkspaces } from "./workspaces";
 import { PasskeyAuthService, formatSetupCode } from "./passkeys";
-import { verifyAuthToken, authCacheScope, draftOwnerScope } from "./auth";
+import { authCacheScope, draftOwnerScope } from "./auth";
 import { TranscriptImages, imagePreview } from "./transcript-images";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { registerAuthRoutes } from "./routes/auth";
+import { registerApiAuth } from "./routes/api-auth";
 import { appBasePath, renderAppShell } from "./app-shell";
 import { createBrowserErrorReporter } from "./browser-errors";
 import { registerCronRoutes } from "./routes/cron";
 import { registerDraftRoutes } from "./routes/drafts";
 import { registerSiteRoutes } from "./routes/sites";
+import { registerArtifactRoutes } from "./routes/artifacts";
+import { ArtifactLibrary } from "./artifact-library";
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
 import { cloudBrowserAvailable, registerCloudBrowserLauncher } from "./cloud-browser-launcher";
 import { Runtime, context } from "./runtime";
 import { readMaintenance } from "./maintenance-state";
 import { acquireLock } from "./lock";
-import { resolveUploadedFile } from "./uploads";
+import { resolveUploadedFile, uploadedPreviewPath } from "./uploads";
 import {
   registerRemoteRoutes,
   authenticateNode,
@@ -76,31 +79,9 @@ const app = fastify({
 await app.register(cookie);
 await registerRpcSocketTransport(app);
 await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024 } });
-app.decorateRequest("auth", false);
-declare module "fastify" {
-  interface FastifyRequest {
-    auth: boolean;
-  }
-}
-const publicApis = new Set([
-  "/api/bootstrap",
-  "/api/version",
-  "/api/logout",
-  "/api/auth/login/options",
-  "/api/auth/login/verify",
-  "/api/auth/register/options",
-  "/api/auth/register/verify",
-]);
-app.addHook("onRequest", async (request, reply) => {
-  request.auth = verifyAuthToken(config.authSecret, request.cookies[config.cookieName]);
-  const pathname = request.url.split("?", 1)[0]!;
-  if (pathname.startsWith("/api/")) reply.header("Cache-Control", "no-store");
-  if (pathname.startsWith("/api/node/")) {
-    return authenticateNode(request, reply, runtime.remotes.access);
-  }
-  if (pathname.startsWith("/api/") && !publicApis.has(pathname) && !request.auth)
-    return reply.code(401).send({ error: "Authentication required" });
-});
+registerApiAuth(app, config, (request, reply) =>
+  authenticateNode(request, reply, runtime.remotes.access),
+);
 const routeContext = {
   app,
   config,
@@ -121,6 +102,7 @@ registerCronRoutes(app, runtime.orchestration);
 const draftScope = draftOwnerScope(config.authSecret);
 await registerDraftRoutes(app, stateDirPath(config.battyDir), draftScope);
 registerSiteRoutes(routeContext);
+registerArtifactRoutes(app, new ArtifactLibrary(config));
 const closeCloudBrowsers = await registerCloudBrowserRoutes(
   app,
   runtime.tools.browserService,
@@ -229,7 +211,7 @@ app.get<{ Params: { imageId: string }; Querystring: { preview?: string } }>(
 );
 app.get<{
   Params: { sessionId: string; batchId: string; name: string };
-  Querystring: { preview?: string };
+  Querystring: { preview?: string; download?: string };
 }>("/api/uploads/:sessionId/:batchId/:name", async (request, reply) => {
   const file = await resolveUploadedFile(
     config.uploadsDir,
@@ -237,11 +219,21 @@ app.get<{
     request.params.batchId,
     request.params.name,
   );
+  if (request.query.download === "1") {
+    return reply
+      .header(
+        "Content-Disposition",
+        `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(file.path))}`,
+      )
+      .header("X-Content-Type-Options", "nosniff")
+      .type(file.mimeType)
+      .send(createReadStream(file.path));
+  }
   if (request.query.preview === "1" && file.mimeType.startsWith("image/"))
     return reply
       .type("image/webp")
       .header("Cache-Control", "no-store")
-      .send(await imagePreview(file.path));
+      .send(await imagePreview(file.path, uploadedPreviewPath(config.uploadsDir, file.path)));
   return reply.type(file.mimeType).send(createReadStream(file.path));
 });
 app.get<{

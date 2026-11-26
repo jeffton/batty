@@ -110,7 +110,7 @@ for (const width of [390]) {
       const direct = page
         .locator(".message--assistant")
         .filter({ hasText: "Independent reminder" });
-      expect(await direct.locator(".message__artifacts").count()).toBe(0);
+      expect(await direct.locator(".message__attachments").count()).toBe(0);
       expect(await commentary.locator(".message__segment--bubble").count()).toBe(1);
       await expect
         .poll(() =>
@@ -150,7 +150,7 @@ for (const width of [390]) {
         const final = page
           .locator(".message--assistant")
           .filter({ hasText: "The unrelated task is complete." });
-        expect(await final.locator(".message__artifacts").count()).toBe(0);
+        expect(await final.locator(".message__attachments").count()).toBe(0);
         expect(await page.getByText("Unselected child.mp4", { exact: true }).count()).toBe(0);
       }
       await page.setViewportSize({ width, height: 1600 });

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { PanelRightOpen } from "@lucide/vue";
 import { computed, ref } from "vue";
-import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import CodemodeDisplay from "@/client/components/CodemodeDisplay.vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
@@ -10,12 +9,14 @@ import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import ToolCallCodeOutput from "@/client/components/ToolCallCodeOutput.vue";
 import ToolCallHeader from "@/client/components/ToolCallHeader.vue";
 import ToolCallMeta from "@/client/components/ToolCallMeta.vue";
+import ToolReportAttachments from "@/client/components/ToolReportAttachments.vue";
+import type { MessagePresentation } from "@/server/message-presentation";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
 import { createHeadView, createToolOutputView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
 import { subagentSessionId as resolveSubagentSessionId } from "@/client/lib/subagent-session";
 import { isPiShellToolName } from "@/shared/pi-tools";
-import type { SentFileDescriptor, ToolExecutionDetails, UiContentBlock } from "@/shared/types";
+import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
 
 // Keep this in sync with .tool-call-code__output-window--collapsed in ToolCallCodeOutput.vue.
 // The collapsed container reserves exactly one line box per truncated line so the
@@ -35,7 +36,6 @@ const props = withDefaults(
     arguments: Record<string, unknown>;
     toolCallId?: string;
     compact?: boolean;
-    suppressSentFiles?: boolean;
     status?: "running" | "success" | "error";
     resultBlocks?: UiContentBlock[];
     resultDetails?: ToolExecutionDetails;
@@ -44,7 +44,6 @@ const props = withDefaults(
   {
     toolCallId: undefined,
     compact: false,
-    suppressSentFiles: false,
     status: undefined,
     resultBlocks: () => [],
     resultDetails: undefined,
@@ -105,6 +104,11 @@ const subagentPopoverId = computed(() => {
 
   return `subagent-session-popover-${stableId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
 });
+const joinedPresentation = computed(() =>
+  props.name === "subagent" && props.arguments.action === "await" && props.status === "success"
+    ? (props.resultDetails?.presentation as MessagePresentation | undefined)
+    : undefined,
+);
 const canOpenSubagentSession = computed(
   () =>
     props.allowSessionPopovers &&
@@ -116,10 +120,7 @@ const subagentOpenLabel = computed(() =>
   props.status === "running" ? "Open live session" : "Open session",
 );
 const hasResultContent = computed(() =>
-  hasToolResultContent(
-    props.resultBlocks,
-    props.suppressSentFiles ? { ...props.resultDetails, sentFiles: [] } : props.resultDetails,
-  ),
+  hasToolResultContent(props.resultBlocks, props.resultDetails),
 );
 const resultText = computed(() =>
   props.resultBlocks
@@ -300,23 +301,6 @@ const showEditDiff = computed(() => {
 
   return typeof oldTextValue.value === "string" || typeof newTextValue.value === "string";
 });
-const sentFiles = computed(() =>
-  Array.isArray(props.resultDetails?.sentFiles)
-    ? props.resultDetails.sentFiles.filter(
-        (file): file is SentFileDescriptor =>
-          Boolean(file) &&
-          typeof file === "object" &&
-          typeof file.id === "string" &&
-          typeof file.name === "string" &&
-          typeof file.size === "number" &&
-          typeof file.mimeType === "string" &&
-          typeof file.kind === "string" &&
-          typeof file.downloadUrl === "string",
-      )
-    : [],
-);
-const hasVisibleSentFiles = computed(() => !props.suppressSentFiles && sentFiles.value.length > 0);
-
 const showResultSection = computed(() => {
   if (props.name === "read") {
     return props.status === "error" && visibleResultBlocks.value.length > 0;
@@ -340,10 +324,6 @@ const showResultSection = computed(() => {
 
   if (isPiShellToolName(props.name)) {
     return !commandValue.value ? hasResultContent.value : visibleResultBlocks.value.length > 0;
-  }
-
-  if (props.name === "attach_files") {
-    return props.status === "error" || hasVisibleSentFiles.value || hasResultContent.value;
   }
 
   return props.status === "error" || hasResultContent.value;
@@ -545,15 +525,6 @@ const genericEntries = computed(() => {
         />
       </template>
 
-      <AttachedFilesList
-        v-if="
-          hasVisibleSentFiles && !(props.name === 'subagent' && subagentRespondIn === 'session')
-        "
-        :files="sentFiles"
-        :preview="props.name !== 'attach_files'"
-        :compact="props.compact"
-      />
-
       <DiffBlock
         v-if="props.name === 'edit' && showEditDiff"
         :diff="props.resultDetails?.diff"
@@ -563,6 +534,11 @@ const genericEntries = computed(() => {
         :compact="props.compact"
       />
     </div>
+    <ToolReportAttachments
+      v-if="joinedPresentation"
+      :presentation="joinedPresentation"
+      :compact="props.compact"
+    />
   </section>
 </template>
 

@@ -10,7 +10,9 @@ import {
   type TaskId,
 } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
-import { fixture, until } from "./orchestration-test-fixture.js";
+import { fixture, until, withAttachments } from "./orchestration-test-fixture.js";
+import { siteLibraryRef } from "@/shared/artifact-library";
+import { entryMessages } from "./runtime.js";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state.js";
 import type { createDeliveryTask } from "./orchestration-delivery.js";
 import type { createWorkers } from "./orchestration-workers.js";
@@ -379,37 +381,28 @@ test.each(["running", "completed", "stop"])(
 );
 
 test.each(["running", "artifact"])(
-  "delivery lookup failure preserves %s work in its parent failure report",
+  "delivery lookup failure reports %s work without delivering attachments",
   async (scenario) => {
-    const { faux, orchestration, open, registry } = await fixture(1000);
-    const artifacts = {
-      sites: [
-        { id: "partial-fault-site", name: "Partial result", url: "https://example.com/partial" },
-      ],
+    const site = {
+      kind: "site" as const,
+      id: "partial-fault-site",
+      name: "Result at source",
+      url: "/partial-fault-site",
+      public: false as const,
     };
-    registry.install(
-      defineExtension({
-        name: "partial-fault-artifact",
-        tools: [
-          defineTool({
-            name: "partial_fault_result",
-            description: "Produce a partial result",
-            parameters: Type.Object({}),
-            execute: async () => ({ output: [fauxText("attached")], details: artifacts }),
-          }),
-        ],
-      }),
+    const siteRef = siteLibraryRef(site.id);
+    const presentation = { sites: [site] };
+    const { faux, orchestration, open } = await fixture(
+      1000,
+      console.error,
+      undefined,
+      undefined,
+      async (_, { artifactRefs }) => {
+        expect(artifactRefs).toEqual([siteRef]);
+        return presentation;
+      },
     );
     const { harness, main } = await open();
-    await main.configure(
-      {
-        extensions: [
-          registry.snapshot().extension("partial-fault-artifact")!,
-          orchestration.extension,
-        ],
-      },
-      context,
-    );
     faux.setResponses(
       Array.from({ length: 20 }, () => (request) => {
         const last = request.messages.findLast((message) => message.role !== "system")!;
@@ -423,9 +416,9 @@ test.each(["running", "artifact"])(
           JSON.stringify(last.content).includes("orphan lookup assignment")
         )
           return scenario === "artifact"
-            ? fauxAssistantMessage([fauxToolCall("partial_fault_result", {})], {
-                stopReason: "toolUse",
-              })
+            ? fauxAssistantMessage([
+                fauxText(withAttachments("source complete", { artifactRefs: [siteRef] })),
+              ])
             : fauxAssistantMessage([fauxText("working ".repeat(1000))]);
         return fauxAssistantMessage([fauxText("noted")]);
       }),
@@ -466,10 +459,14 @@ test.each(["running", "artifact"])(
           action: "inspect",
           sessionId: worker.sessionId,
         });
-        expect("details" in inspected && inspected.details).toMatchObject({
-          referencedArtifacts: artifacts,
+        expect("details" in inspected && inspected.details).toEqual({ presentation: {} });
+        expect(messages).not.toContain(siteRef);
+        const source = (await harness.conversation(Number(worker.sessionId) as never, context))!;
+        expect(entryMessages((await source.context(context)).entries).at(-1)).toMatchObject({
+          role: "assistant",
+          blocks: [fauxText("source complete")],
+          sites: [site],
         });
-        expect(messages).toContain("partial-fault-site");
       }
       expect(
         (await harness.snapshot(WorkerDoc, Number(worker.sessionId) as never, context))?.completion,

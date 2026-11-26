@@ -280,9 +280,9 @@ Codemode uses Pi Durable 1.4 native version 2 tasks and `output` receipts. Versi
 
 ## AI tool names
 
-Batty-owned AI tools use snake_case. `web_search`, `attach_files` and `attach_artifacts` replace their hyphenated names, including codemode discovery and `tools.<name>` invocation. MCP names keep their existing `mcp__` normalization; codemode's JavaScript helpers such as `searchTools` are unchanged.
+Batty-owned tools use snake_case. MCP names retain the `mcp__` prefix. For file imports and message selection see [Artifacts](artifacts.md).
 
-This is a breaking change without aliases or history migration. Instructions and scripts must use the new names. Persisted calls retain their original names: unfinished calls or codemode scripts using renamed tools cannot resume under this release. Completed results and artifacts remain stored, but name-specific UI rendering uses the new names.
+This is a breaking change without aliases. Instructions and scripts must use the new names. Persisted calls retain their original names: unfinished calls or codemode scripts using renamed tools cannot resume under this release. Completed results and artifacts remain stored, but name-specific UI rendering uses the new names.
 
 ## Image reads in codemode
 

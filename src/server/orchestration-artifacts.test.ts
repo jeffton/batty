@@ -1,73 +1,81 @@
 import { expect, test } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-
 import { Type } from "typebox";
-
+import { fileLibraryRef, siteLibraryRef } from "@/shared/artifact-library";
 import { OrchestrationDoc } from "./orchestration.js";
+import { DeliveryRecord } from "./orchestration-history";
 import { orchestrationHistory } from "./orchestration-test-history";
-
 import { decodeRuntimeNotice } from "./runtime-notices.js";
-
 import { entryMessages } from "./runtime.js";
-
-import { artifactRefs, createAttachArtifactsTool } from "./artifact-forwarding";
-
-import { fixture, until } from "./orchestration-test-fixture.js";
+import { fixture, until, withAttachments } from "./orchestration-test-fixture.js";
 
 test.each(["assistant", "direct"] as const)(
-  "cron preserves helper artifacts through explicit joins, delivery=%s",
+  "cron delivers only final message selections from joined worker artifacts (delivery=%s)",
   async (delivery) => {
-    const { faux, orchestration, open, registry } = await fixture();
     const file = {
       id: "f",
       storedPath: "/var/lib/batty2/sent-files/child/Cabin.jpg",
       name: "Cabin.jpg",
       size: 1,
       mimeType: "image/jpeg",
-      kind: "image",
+      kind: "image" as const,
       downloadUrl: "/api/sent-files/f",
     };
     const site = {
       kind: "site" as const,
       id: "s",
-      name: "Site",
+      name: "Finished site",
       url: "/api/sites/s",
       public: false as const,
     };
+    const draft = { ...site, id: "draft", name: "Unselected draft" };
+    const fileRef = fileLibraryRef(file.id);
+    const siteRef = siteLibraryRef(site.id);
+    const { faux, orchestration, open, registry } = await fixture(
+      10_000,
+      console.error,
+      undefined,
+      undefined,
+      async (_, { artifactRefs }) => {
+        switch (artifactRefs?.join(",")) {
+          case [fileRef, siteRef].join(","):
+            return { sentFiles: [file], sites: [site] };
+          case siteRef:
+            return { sites: [site] };
+          default:
+            throw new Error(`Unexpected selection: ${artifactRefs}`);
+        }
+      },
+    );
     registry.install(
       defineExtension({
         name: "artifact-fixture",
         tools: [
           defineTool({
             name: "emit-artifacts",
-            description: "Emit artifacts",
+            description: "Create candidate artifacts",
             parameters: Type.Object({}),
             execute: async () => ({
-              content: [{ type: "text", text: "Emitted" }],
+              output: [{ type: "text", text: "Created" }],
               details: {
                 sentFiles: [file],
-                sites: [site],
-                battyFileChanges: [
-                  { path: "a.ts", before: "before\n", after: "after\n", patch: "unused" },
-                ],
+                sites: [site, draft],
+                battyFileChanges: [{ path: "a.ts", before: "before\n", after: "after\n" }],
               },
             }),
           }),
         ],
       }),
     );
-    const { main } = await open();
+    const { harness, main } = await open();
     let joinedModelInput = "";
     let reportModelInput = "";
     faux.setResponses(
       Array.from({ length: 30 }, () => (request) => {
         const last = request.messages.findLast((m) => m.role !== "system")!;
         const text = JSON.stringify(last.content);
-        if (text.includes("helper done")) joinedModelInput = text;
-        if (last.role === "user" && text.includes("cron finished")) reportModelInput = text;
         if (last.role === "user" && text.includes("artifact outer"))
           return fauxAssistantMessage(
             [fauxToolCall("subagent", { action: "run", prompt: "artifact inner" })],
@@ -78,7 +86,9 @@ test.each(["assistant", "direct"] as const)(
             stopReason: "toolUse",
           });
         if (last.role === "toolResult" && last.toolName === "emit-artifacts")
-          return fauxAssistantMessage([fauxText("helper done")]);
+          return fauxAssistantMessage([
+            fauxText(withAttachments("helper done", { artifactRefs: [fileRef, siteRef] })),
+          ]);
         if (
           last.role === "toolResult" &&
           last.toolName === "subagent" &&
@@ -89,7 +99,14 @@ test.each(["assistant", "direct"] as const)(
             stopReason: "toolUse",
           });
         }
-        return fauxAssistantMessage([fauxText("cron finished")]);
+        if (text.includes("helper done")) joinedModelInput = text;
+        if (last.role === "user" && text.includes("cron finished")) {
+          reportModelInput = text;
+          return fauxAssistantMessage([fauxText("report acknowledged")]);
+        }
+        return fauxAssistantMessage([
+          fauxText(withAttachments("cron finished", { artifactRefs: [siteRef] })),
+        ]);
       }),
     );
     const job = await orchestration.addJob({
@@ -103,181 +120,55 @@ test.each(["assistant", "direct"] as const)(
       (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
     }, context);
     await orchestration.tick();
-    await until(async () => (await orchestration.listRunLogs())[0]?.status === "completed");
+    await until(async () => (await orchestration.listRunLogs(job.id))[0]?.status === "completed");
     await main.waitForIdle(context);
-    const reports = (await main.context(context)).messages
-      .filter((m) => m.role === "user")
-      .map((m) => decodeRuntimeNotice(m.content))
-      .filter((notice) => notice?.data?.runtimeNotice);
-    if (delivery === "direct") {
-      expect(reports).toHaveLength(0);
-      expect(
-        entryMessages((await main.context(context)).entries).findLast(
-          (message) => message.role === "assistant",
-        ),
-      ).toMatchObject({
-        blocks: [fauxText("cron finished")],
-        sentFiles: [file],
-        sites: [site],
-        fileChanges: [{ path: "a.ts" }],
-      });
-      const directNotice = (await main.context(context)).messages
-        .filter((message) => message.role === "user")
-        .map((message) => decodeRuntimeNotice(message.content))
-        .find((notice) => notice?.data?.directDelivery);
-      expect(directNotice!.data!.directDelivery).toEqual({ text: "cron finished" });
-      const directArtifacts = directNotice!.data!.runtimeResultArtifacts as Parameters<
-        typeof artifactRefs
-      >[0];
-      expect(
-        artifactRefs(directArtifacts)
-          .map((item) => item.kind)
-          .sort(),
-      ).toEqual(["diff", "file", "site"]);
-      for (const item of artifactRefs(directArtifacts))
-        expect(directNotice!.text).toContain(item.ref);
-      expect(directNotice!.text).toContain("call attach_artifacts");
-      expect(joinedModelInput).toContain(file.storedPath);
-      expect(joinedModelInput).toContain("call attach_artifacts");
-      expect(joinedModelInput).toContain("diff:");
-      expect(joinedModelInput).toContain("site:");
-      return;
-    }
-    expect(reports).toHaveLength(1);
-    expect(reports[0]!.data!.runtimeResultArtifacts).toMatchObject({
+    const run = (await orchestration.listRunLogs(job.id))[0]!;
+    const receipt = await harness.snapshot(DeliveryRecord, String(run.taskId), context);
+    expect(receipt?.presentation).toEqual({ sites: [site] });
+    expect(receipt?.directDelivered).toBe(delivery === "direct" ? true : undefined);
+
+    expect(joinedModelInput).toContain(fileRef);
+    expect(joinedModelInput).toContain(siteRef);
+    expect(joinedModelInput).not.toContain(draft.name);
+    expect(joinedModelInput).not.toContain("<batty-attachments>");
+
+    const helper = Object.values((await orchestrationHistory(harness)).workers).find(
+      (worker) => worker.prompt === "artifact inner",
+    )!;
+    const child = (await harness.conversation(helper.id, context))!;
+    expect(entryMessages((await child.context(context)).entries).at(-1)).toMatchObject({
+      role: "assistant",
+      blocks: [fauxText("helper done")],
       sentFiles: [file],
       sites: [site],
       fileChanges: [{ path: "a.ts" }],
     });
-    expect(JSON.stringify(reports[0])).toContain("-before");
-    for (const input of [joinedModelInput, reportModelInput]) {
-      expect(input).toContain(file.storedPath);
-      expect(input).toContain(file.name);
-      expect(input).toContain("Use attach_files to import local files by path");
-      expect(input).toContain("Copying attachment:// links does not deliver attachments");
-      expect(input).toContain("call attach_artifacts");
-      expect(input).toContain("diff:");
-      expect(input).toContain("site:");
+
+    const { entries, messages } = await main.context(context);
+    const notices = messages
+      .filter((m) => m.role === "user")
+      .map((m) => decodeRuntimeNotice(m.content))
+      .filter((notice) => notice?.kind === "cron");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.data?.runtimePresentation).toEqual({ sites: [site] });
+    expect(notices[0]!.data?.directDelivery).toEqual(
+      delivery === "direct" ? { text: "cron finished" } : undefined,
+    );
+    if (delivery === "assistant") {
+      expect(reportModelInput).toContain(siteRef);
+      expect(reportModelInput).not.toContain(fileRef);
     }
+    const visible = entryMessages(entries).filter((message) => message.role === "assistant");
+    expect(visible).toHaveLength(1);
+    expect(visible[0]).toMatchObject({
+      blocks: [fauxText(delivery === "direct" ? "cron finished" : "report acknowledged")],
+    });
+    expect(visible[0]!.sites).toEqual(delivery === "direct" ? [site] : undefined);
+    expect(visible[0]!.sentFiles).toBeUndefined();
+    expect(visible[0]!.fileChanges).toBeUndefined();
   },
   15000,
 );
-
-test("async subagent reports expose artifacts and parent forwards the same live browser", async () => {
-  const { faux, orchestration, open, registry } = await fixture();
-  const browser = {
-    kind: "browser" as const,
-    id: "browser-child-session",
-    browserId: "child-session",
-    name: "Cloud browser",
-    url: "/api/cloud-browser/child-session/state",
-    public: false as const,
-  };
-  const browserRef = artifactRefs({ sites: [browser] })[0]!.ref;
-  const file = {
-    id: "child-file",
-    name: "chosen.png",
-    storedPath: "/var/lib/batty2/sent-files/child/chosen.png",
-    size: 1,
-    mimeType: "image/png",
-    kind: "image",
-    downloadUrl: "/api/sent-files/child-file",
-  };
-  registry.install(
-    defineExtension({
-      name: "async-attachment-fixture",
-      tools: [
-        createAttachArtifactsTool(),
-        defineTool({
-          name: "attach_files",
-          description: "Attach the chosen image",
-          parameters: Type.Object({}),
-          execute: async () => ({
-            content: [{ type: "text", text: "Attached" }],
-            details: { sentFiles: [file] },
-          }),
-        }),
-        defineTool({
-          name: "scratch",
-          description: "Produce incidental artifacts during work",
-          parameters: Type.Object({}),
-          execute: async () => ({
-            content: [{ type: "text", text: "Worked" }],
-            details: {
-              sites: [
-                {
-                  kind: "site" as const,
-                  id: "async-site",
-                  name: "Async demo",
-                  url: "/async-site",
-                  public: false as const,
-                },
-                browser,
-              ],
-              fileChanges: [{ path: "async.ts", patch: "saved patch" }],
-            },
-          }),
-        }),
-      ],
-    }),
-  );
-  const { main } = await open();
-  let reportInput = "";
-  faux.setResponses(
-    Array.from({ length: 20 }, () => (request) => {
-      const last = request.messages.findLast((m) => m.role !== "system")!;
-      const text = JSON.stringify(last.content);
-      if (last.role === "user" && text.includes("start attachment worker"))
-        return fauxAssistantMessage(
-          [fauxToolCall("subagent", { action: "run", prompt: "produce attachment" })],
-          { stopReason: "toolUse" },
-        );
-      if (last.role === "user" && text.includes("produce attachment"))
-        return fauxAssistantMessage([fauxToolCall("scratch", {})], { stopReason: "toolUse" });
-      if (last.role === "toolResult" && last.toolName === "scratch")
-        return fauxAssistantMessage([fauxToolCall("attach_files", {})], { stopReason: "toolUse" });
-      if (last.role === "toolResult" && last.toolName === "attach_files")
-        return fauxAssistantMessage([fauxText("child artifact ready")]);
-      if (last.role === "user" && text.includes("child artifact ready")) {
-        reportInput = text;
-        return fauxAssistantMessage([fauxToolCall("attach_artifacts", { refs: [browserRef] })], {
-          stopReason: "toolUse",
-        });
-      }
-      return fauxAssistantMessage([fauxText("parent acknowledged")]);
-    }),
-  );
-  await (
-    await main.submit({ type: "input", content: "start attachment worker" }, context)
-  ).wait(context);
-  await until(async () => (await orchestration.listRunning()).length === 0);
-  await main.waitForIdle(context);
-  expect(reportInput).toContain(file.name);
-  expect(reportInput).toContain(file.storedPath);
-  expect(reportInput).toContain("Use attach_files to import local files by path");
-  expect(reportInput).toContain("do not automatically forward every draft");
-  expect(reportInput).toContain("call attach_artifacts");
-  expect(reportInput).toContain("async.ts");
-  expect(reportInput).toContain("Async demo");
-  expect(browserRef).toMatch(/^browser:/);
-  expect(reportInput).toContain(browserRef);
-  expect(reportInput).toContain(browser.browserId);
-  const entries = (await main.context(context)).entries;
-  const report = entryMessages(entries).find(
-    (message) => message.role === "custom" && message.text.includes("child artifact ready"),
-  );
-  expect(report?.role === "custom" && report.data?.runtimeResultArtifacts).toEqual({
-    sentFiles: [file],
-  });
-  const forwardedCall = entries
-    .flatMap((entry) => entry.model ?? [])
-    .findLast(
-      (message) => message.role === "toolResult" && message.toolName === "attach_artifacts",
-    );
-  expect(forwardedCall?.role).toBe("toolResult");
-  if (forwardedCall?.role === "toolResult")
-    expect(forwardedCall.details).toMatchObject({ forwardedArtifacts: { sites: [browser] } });
-});
 
 test.each([false, true] as const)(
   "cron joins parallel children (late=%s) and finishes postprocessing before delivery",

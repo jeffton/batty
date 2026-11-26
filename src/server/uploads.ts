@@ -1,7 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import mime from "mime-types";
+import { fileLibraryRef } from "@/shared/artifact-library";
+import type { SentFileDescriptor } from "@/shared/types";
+import { missingFile, storageDirectories, storageEntries } from "./artifact-storage";
 import { prepareProviderImage } from "./provider-images";
 export interface UploadedFile {
   filename: string;
@@ -52,6 +55,70 @@ function uploadUrl(
   return `${base}${route}`;
 }
 
+function uploadedFileId(sessionId: string, batchId: string, name: string) {
+  return createHash("sha256")
+    .update(JSON.stringify([sessionId, batchId, name]))
+    .digest("hex");
+}
+
+function uploadedFileDescriptor(
+  id: string,
+  baseUrl: string,
+  sessionId: string,
+  batchId: string,
+  name: string,
+  size: number,
+): SentFileDescriptor {
+  const url = uploadUrl(baseUrl, sessionId, batchId, name);
+  const mimeType = mime.lookup(name) || "application/octet-stream";
+  const kind = mimeType.startsWith("image/")
+    ? "image"
+    : mimeType.startsWith("video/")
+      ? "video"
+      : "file";
+  return {
+    id,
+    name,
+    size,
+    mimeType,
+    kind,
+    downloadUrl: `${url}?download=1`,
+    ...(kind === "file" ? {} : { previewUrl: url }),
+  };
+}
+
+export function uploadedPreviewPath(uploadsDir: string, filePath: string) {
+  const id = createHash("sha256").update(path.relative(uploadsDir, filePath)).digest("hex");
+  return path.join(uploadsDir, ".previews", `${id}.webp`);
+}
+
+export async function* storedUploadedFiles(uploadsDir: string, baseUrl: string, fileId?: string) {
+  for (const session of await storageDirectories(uploadsDir)) {
+    const sessionId = path.basename(session);
+    if (sessionId.startsWith(".")) continue;
+    for (const batch of await storageDirectories(session)) {
+      const batchId = path.basename(batch);
+      if (batchId.startsWith(".")) continue;
+      for (const entry of await storageEntries(batch)) {
+        if (!entry.isFile()) continue;
+        const { name } = entry;
+        const id = uploadedFileId(sessionId, batchId, name);
+        if (fileId !== undefined && id !== fileId) continue;
+        try {
+          const stats = await fs.stat(path.join(batch, name));
+          yield {
+            file: uploadedFileDescriptor(id, baseUrl, sessionId, batchId, name, stats.size),
+            createdAt: stats.mtimeMs,
+            location: { sessionId, batchId, storedName: name },
+          };
+        } catch (error) {
+          if (!missingFile(error)) throw error;
+        }
+      }
+    }
+  }
+}
+
 export async function preparePromptFiles(
   uploadsDir: string,
   sessionId: string,
@@ -61,14 +128,35 @@ export async function preparePromptFiles(
   const result: PreparedPromptFiles = { text: "", images: [], uploadedImages: [] };
   if (files.length === 0) return result;
   const batchId = randomUUID();
-  const sessionDir = path.join(uploadsDir, sessionId, batchId);
-  await fs.mkdir(sessionDir, { recursive: true });
+  const sessionDir = path.join(uploadsDir, sessionId);
+  const batchDir = path.join(sessionDir, batchId);
+  const staging = path.join(sessionDir, `.${batchId}`);
+  await fs.mkdir(staging, { recursive: true });
+  try {
+    await writePromptBatch(result, files, staging, batchDir, sessionId, batchId, baseUrl);
+    await fs.rename(staging, batchDir);
+  } catch (error) {
+    await fs.rm(staging, { recursive: true, force: true });
+    throw error;
+  }
+  return result;
+}
+
+async function writePromptBatch(
+  result: PreparedPromptFiles,
+  files: UploadedFile[],
+  staging: string,
+  batchDir: string,
+  sessionId: string,
+  batchId: string,
+  baseUrl?: string,
+) {
   const usedNames = new Set<string>();
   for (const file of files) {
     const name = sanitizeFileName(file.filename || "attachment.bin");
     const storedName = uniqueStoredName(name, usedNames);
-    const filePath = path.join(sessionDir, storedName);
-    await fs.writeFile(filePath, file.data);
+    const filePath = path.join(batchDir, storedName);
+    await fs.writeFile(path.join(staging, storedName), file.data);
     const mimeType = mime.lookup(storedName) || "application/octet-stream";
     const size = file.data.length;
     const url = uploadUrl(baseUrl, sessionId, batchId, storedName);
@@ -77,9 +165,9 @@ export async function preparePromptFiles(
       result.images.push(await prepareProviderImage({ type: "image", mimeType, data }));
       result.uploadedImages.push({ name, storedName, batchId, mimeType, size, data, url });
     }
-    result.text += `<file name="${escapeXmlAttribute(name)}" mimeType="${escapeXmlAttribute(mimeType)}" size="${size}" path="${escapeXmlAttribute(filePath)}" url="${escapeXmlAttribute(url)}"></file>\n`;
+    const artifactRef = fileLibraryRef(uploadedFileId(sessionId, batchId, storedName));
+    result.text += `<file name="${escapeXmlAttribute(name)}" mimeType="${escapeXmlAttribute(mimeType)}" size="${size}" path="${escapeXmlAttribute(filePath)}" url="${escapeXmlAttribute(url)}" artifactRef="${artifactRef}"></file>\n`;
   }
-  return result;
 }
 
 export async function resolveUploadedFile(

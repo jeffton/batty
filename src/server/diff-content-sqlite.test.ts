@@ -7,8 +7,7 @@ import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite";
 import { expect, test } from "vite-plus/test";
-import { artifactRefs, responseArtifacts } from "./artifact-forwarding";
-import { createArtifactStore, openArtifactSqliteDatabase } from "./artifact-sqlite";
+import { createDiffContentStore, openDiffContentSqliteDatabase } from "./diff-content-sqlite";
 import { createHistoryIndex } from "./history-index";
 import { encodeRuntimeNotice } from "./runtime-notices";
 
@@ -57,13 +56,13 @@ test("SQLite persists exact file versions once across legacy migration and new w
   const directory = await mkdtemp(join(tmpdir(), "batty-artifact-test-"));
   try {
     const path = join(directory, "runtime.sqlite");
-    const db = await openArtifactSqliteDatabase(path);
+    const db = await openDiffContentSqliteDatabase(path);
     const storage = await SqliteStorage.open(db);
     const index = await createHistoryIndex(db);
     const one = JSON.stringify(entry(1));
     const two = JSON.stringify(entry(2));
     await db.run("INSERT INTO entries VALUES (1,1,NULL,1,?)", one);
-    db.enableArtifactWrites();
+    db.enableDiffContentWrites();
     await db.run("INSERT INTO entries VALUES (2,1,NULL,2,?)", two);
     await expect(
       db.transaction(async (tx) => {
@@ -76,14 +75,11 @@ test("SQLite persists exact file versions once across legacy migration and new w
     ).rejects.toThrow("abort transaction");
     expect(await index.count(1)).toBe(4);
     expect((await index.entries(1, undefined, 10)).entries).toEqual([entry(1), entry(2)]);
-    expect(artifactRefs(responseArtifacts(await index.responseArtifacts(1, 3)))).toEqual(
-      artifactRefs(artifacts),
-    );
     await storage.close(context);
 
     const raw = new DatabaseSync(path);
     try {
-      const store = createArtifactStore(raw, true);
+      const store = createDiffContentStore(raw, true);
       const read = raw.prepare("SELECT record FROM entries WHERE id=?");
       expect(read.get(1)?.record).toBe(one);
       const packed = read.get(2)?.record as string;
@@ -107,20 +103,17 @@ test("SQLite persists exact file versions once across legacy migration and new w
     } finally {
       raw.close();
     }
-    const reopened = await openArtifactSqliteDatabase(path);
+    const reopened = await openDiffContentSqliteDatabase(path);
     try {
-      reopened.enableArtifactWrites();
+      reopened.enableDiffContentWrites();
       const reopenedIndex = await createHistoryIndex(reopened);
       expect((await reopenedIndex.entries(1, undefined, 10)).entries).toEqual([entry(1), entry(2)]);
-      expect(artifactRefs(responseArtifacts(await reopenedIndex.responseArtifacts(1, 3)))).toEqual(
-        artifactRefs(artifacts),
-      );
       const newest = JSON.stringify(entry(3));
       await reopened.run("INSERT INTO entries VALUES (3,1,NULL,3,?)", newest);
       await promisify(execFile)(process.execPath, [
         "--import",
         "tsx",
-        "scripts/artifact-dedup.ts",
+        "scripts/diff-content-dedup.ts",
         "inline",
         path,
       ]);
@@ -145,10 +138,10 @@ test("SQLite persists exact file versions once across legacy migration and new w
 });
 
 test("replays revisions with inlined Chord operands before applying deltas", async () => {
-  const db = await openArtifactSqliteDatabase(":memory:");
+  const db = await openDiffContentSqliteDatabase(":memory:");
   const storage = await SqliteStorage.open(db);
   try {
-    db.enableArtifactWrites();
+    db.enableDiffContentWrites();
     const id = 10 as never;
     const record = {
       id,
@@ -204,9 +197,9 @@ test("replays revisions with inlined Chord operands before applying deltas", asy
 });
 
 test("fresh ref-shaped data does not resolve another row's content, including through task upserts", async () => {
-  const db = await openArtifactSqliteDatabase(":memory:");
+  const db = await openDiffContentSqliteDatabase(":memory:");
   await SqliteStorage.open(db);
-  db.enableArtifactWrites();
+  db.enableDiffContentWrites();
   const encoding = await db.get<{ namespace: string }>(
     "SELECT namespace FROM batty_artifact_encoding_v1",
   );

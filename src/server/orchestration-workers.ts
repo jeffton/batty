@@ -35,9 +35,7 @@ import {
   encodeRuntimeNotice,
 } from "./runtime-notices.js";
 
-import { reportWithAttachments } from "./attachment-contract.js";
-import { mergeResponseArtifacts, reportWithArtifacts } from "./artifact-forwarding.js";
-import { subagentReportArtifacts } from "./runtime-result-artifacts.js";
+import { describePresentation, type AttachmentSelection } from "./message-presentation.js";
 
 import { ArchivedWorker, DeliveryRecord } from "./orchestration-history";
 
@@ -50,7 +48,7 @@ import {
 } from "./orchestration-state.js";
 import type { createDeliveryTask } from "./orchestration-delivery.js";
 
-export type WorkerCommand = {
+export type WorkerCommand = AttachmentSelection & {
   action:
     | "run"
     | "await"
@@ -229,15 +227,13 @@ export function createWorkers(
     phases: {
       wait: async (task, runtime, ctx) => {
         const settled = await runtime.waitForTask(task.input.target, ctx);
-        const artifacts = (await runtime.snapshot(DeliveryRecord, String(task.input.target), ctx))
-          ?.artifacts;
+        const presentation = (
+          await runtime.snapshot(DeliveryRecord, String(task.input.target), ctx)
+        )?.presentation;
         const text =
           `Subagent ${settled.state.outcome.status === "completed" ? "result" : settled.state.outcome.status}. Session ID: ${task.input.workerId}\n\n${
             typeof settled.state.outcome.result === "string"
-              ? reportWithArtifacts(
-                  reportWithAttachments(settled.state.outcome.result, artifacts?.sentFiles),
-                  artifacts,
-                )
+              ? describePresentation(settled.state.outcome.result, presentation)
               : ""
           }`.trimEnd();
         const parent = (await runtime.conversation(task.input.parentId, ctx))!;
@@ -259,7 +255,7 @@ export function createWorkers(
                 text,
                 data: {
                   subagent: { sessionId: task.input.workerId },
-                  ...(artifacts ? { runtimeResultArtifacts: artifacts } : {}),
+                  ...(presentation ? { runtimePresentation: presentation } : {}),
                 },
               }),
               whenBusy: "steer",
@@ -277,7 +273,7 @@ export function createWorkers(
   });
   const queryWorkers = async (
     args: WorkerCommand,
-    api: Pick<WorkerCommandContext, "conversationId" | "snapshot" | "commit">,
+    api: Pick<WorkerCommandContext, "conversationId" | "snapshot" | "commit" | "remoteAssignment">,
     ctx: Context,
   ) => {
     const state = await api.snapshot(OrchestrationDoc, ctx);
@@ -388,15 +384,15 @@ export function createWorkers(
               kind: "result",
               assignmentId: String(resultAssignment),
               text: completed.state.outcome.result as string,
-              artifacts:
-                (await tx.doc(DeliveryRecord, String(resultAssignment), {})).artifacts ?? {},
+              presentation:
+                (await tx.doc(DeliveryRecord, String(resultAssignment), {})).presentation ?? {},
             }
           : latest
             ? {
                 kind: "report",
                 assignmentId: String(latest.assignmentId),
                 text: latest.text,
-                artifacts: latest.artifacts,
+                presentation: latest.presentation,
               }
             : undefined;
       // Inspection discovers references; it does not produce attachment effects.
@@ -412,7 +408,9 @@ export function createWorkers(
                   latest: {
                     kind: result.kind,
                     assignmentId: result.assignmentId,
-                    text: reportWithArtifacts(result.text.slice(0, 16_000), result.artifacts),
+                    text: api.remoteAssignment
+                      ? result.text.slice(0, 16_000)
+                      : describePresentation(result.text.slice(0, 16_000), result.presentation),
                     truncated: result.text.length > 16_000,
                   },
                 }
@@ -421,9 +419,7 @@ export function createWorkers(
         ),
         details: result
           ? {
-              referencedArtifacts: JSON.parse(
-                JSON.stringify(mergeResponseArtifacts(result.artifacts)),
-              ) as JsonValue,
+              presentation: JSON.parse(JSON.stringify(result.presentation ?? {})) as JsonValue,
             }
           : {},
       };
@@ -433,7 +429,7 @@ export function createWorkers(
   const workerTool = {
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and main-memory context, not the sender's history. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Send files with run, queue, resume or steer using files: [{path: 'local/path'}] or [{ref: 'file:...'}]. Selected files are immutable snapshots copied to the receiving installation; images are visible to its model. Maximum 32 files and 100 MiB total per message. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Main and assigned workers, including cron workers, may delegate across local workspaces and connected installations. These are coordination guardrails, not a security boundary. list defaults to running workers across workspaces; use status=all for history. Local pages come first, newest sessions first; remote pages follow grouped by node, newest sessions first within each node. workspaceId filters list results. Results include stable sessionId, parentId, assignmentId, workspace and status. limit defaults to 50 (max 100); history scans up to limit conversations per page. Pass nextCursor back as cursor with the same filters, even for empty history pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and all assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; explicit attachments accompany the report; other assignment artifacts are available by ref. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and main-memory context, not the sender's history. Coordinator list includes remote mirrors. Only explicitly selected files are relayed between Batty installations. Send files with run, queue, resume or steer using files: [{path: 'local/path'}] or [{ref: 'file:...'}]. Selected files are immutable snapshots copied to the receiving installation; images are visible to its model. Maximum 32 files and 100 MiB total per message. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Main and assigned workers, including cron workers, may delegate across local workspaces and connected installations. These are coordination guardrails, not a security boundary. list defaults to running workers across workspaces; use status=all for history. Local pages come first, newest sessions first; remote pages follow grouped by node, newest sessions first within each node. workspaceId filters list results. Results include stable sessionId, parentId, assignmentId, workspace and status. limit defaults to 50 (max 100); history scans up to limit conversations per page. Pass nextCursor back as cursor with the same filters, even for empty history pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and all assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. Inspection is read-only. Workers can report an intermediate update to their actual parent with action=report and prompt, without ending their work. Add artifactRefs and/or browserId to attach only to that report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe" as const,
     parameters: Type.Object({
       action: Type.Union(
@@ -476,12 +472,19 @@ export function createWorkers(
           { minItems: 1, maxItems: 32 },
         ),
       ),
+      artifactRefs: Type.Optional(Type.Array(Type.String())),
+      browserId: Type.Optional(Type.String()),
       prompt: Type.Optional(Type.String()),
       model: Type.Optional(Type.String()),
       effort: Type.Optional(Type.String()),
       workspaceId: Type.Optional(Type.String()),
     }),
     execute: async (args: WorkerCommand, api: WorkerCommandContext, ctx: Context) => {
+      if (
+        (args.artifactRefs !== undefined || args.browserId !== undefined) &&
+        args.action !== "report"
+      )
+        throw new Error("artifactRefs and browserId are supported only on report");
       if (args.files !== undefined && !["run", "queue", "resume", "steer"].includes(args.action))
         throw new Error("files are supported only on run, queue, resume and steer");
       await api.commit(async (tx) => {
@@ -510,69 +513,48 @@ export function createWorkers(
         if (!metadata?.isSubagent || metadata.parentId === undefined || !metadata.completion)
           throw new Error("Only an assigned subagent can report to its parent");
         const parentId = metadata.parentId;
-        // Pin both text and attachment descriptors across safe tool replay. Only
-        // this assignment contributes artifacts, never an earlier resumed run.
-        const content = await api.memo(
-          "batty.progress-report",
-          await api.commit(async (tx) => {
-            const source = await tx.submissionByRequest(
-              api.conversationId,
-              `batty-deliver:${metadata.completion!.owner}`,
-            );
-            if (!source?.entry) throw new Error("Missing subagent assignment entry");
-            const entries = [];
-            let cursor;
-            do {
-              const page = await tx.scanEntries(
-                { conversationId: api.conversationId, minEntryId: source.entry },
-                200,
-                cursor,
-              );
-              entries.unshift(...[...page.items].reverse());
-              cursor = page.next;
-            } while (cursor);
-            const artifacts = subagentReportArtifacts(entries);
+        const prompt = args.prompt;
+        const assignmentId = metadata.completion.owner;
+        const receiptKey = `progress-report:${api.taskId}`;
+        const saved = await api.snapshot(DeliveryRecord, receiptKey, ctx);
+        const assignment = await api.getTask(assignmentId, ctx);
+        const remote = (assignment?.input as DeliveryInput | undefined)?.remoteAssignment;
+        let content = saved?.progressContent;
+        if (content === undefined) {
+          const presentation = await services.resolvePresentation(api.conversationId, args);
+          content = await api.commit(async (tx) => {
+            const receipt = await tx.doc(DeliveryRecord, receiptKey, {});
+            if (receipt.progressContent !== undefined) return receipt.progressContent;
             const worker = await tx.doc(WorkerDoc, api.conversationId);
+            const outcome = {
+              assignmentId,
+              text: prompt,
+              presentation: presentation as typeof presentation & Record<string, JsonValue>,
+            };
             if (!worker.latestReport || Number(worker.latestReport.taskId) <= Number(api.taskId))
-              worker.latestReport = {
-                taskId: api.taskId,
-                assignmentId: metadata.completion!.owner,
-                text: args.prompt!,
-                artifacts: artifacts as typeof artifacts & Record<string, JsonValue>,
-              };
-            const assignment = await tx.task(metadata.completion!.owner);
-            if ((assignment?.input as DeliveryInput | undefined)?.remoteAssignment) {
-              const receipt = await tx.doc(DeliveryRecord, `remote-report:${api.taskId}`, {});
-              if (!receipt.directDelivered) {
-                await tx.appendEntry(api.conversationId, {
-                  kind: "batty.remote-report",
-                  data: {
-                    assignment: (assignment!.input as unknown as DeliveryInput).remoteAssignment!,
-                    assignmentId: String(metadata.completion!.owner),
-                    text: args.prompt!,
-                    artifacts: artifacts as typeof artifacts & Record<string, JsonValue>,
-                  },
-                });
-                receipt.directDelivered = true;
-              }
+              worker.latestReport = { ...outcome, taskId: api.taskId };
+            if (remote) {
+              await tx.appendEntry(api.conversationId, {
+                kind: "batty.remote-report",
+                data: { ...outcome, assignment: remote, assignmentId: String(assignmentId) },
+              });
             }
-            return encodeRuntimeNotice({
+            receipt.progressContent = encodeRuntimeNotice({
               kind: "subagent",
-              text: `[subagent ${api.conversationId} report]\n${reportWithArtifacts(reportWithAttachments(args.prompt!, artifacts.sentFiles), artifacts)}`,
+              text: `[subagent ${api.conversationId} report]\n${describePresentation(prompt, presentation)}`,
               data: {
-                runtimeResultArtifacts: artifacts,
+                runtimePresentation: presentation,
                 runtimeNotice: {
                   text: `Subagent ${api.conversationId} report`,
-                  markdown: args.prompt!,
+                  markdown: prompt,
                 },
                 subagent: { sessionId: String(api.conversationId) },
               },
             });
-          }, ctx),
-          ctx,
-        );
-        const assignment = await api.getTask(metadata.completion.owner, ctx);
-        if ((assignment?.input as DeliveryInput | undefined)?.remoteAssignment)
+            return receipt.progressContent;
+          }, ctx);
+        }
+        if (remote)
           return reply(
             `Reported to remote parent. Session ID: ${api.conversationId}. Work may continue.`,
           );
@@ -697,13 +679,15 @@ export function createWorkers(
           const receipt = await tx.doc(DeliveryRecord, String(target), {});
           receipt.join = waiter ?? api.taskId;
           if (!waiting) {
-            receipt.joinConsumed = true;
             // The first await's continuation may be queued behind another
             // helper. Returning it here consumes that pending notification too.
             const joined =
               waiter === undefined
                 ? undefined
                 : await tx.submissionByRequest(api.conversationId, `batty-join:${waiter}`);
+            if (!receipt.joinConsumed && !joined?.entry && !report?.entry)
+              receipt.joinPresentationTask = api.taskId;
+            receipt.joinConsumed = true;
             if (joined?.status === "queued") {
               tx.settleSubmission(joined.id, { status: "unanswered", reason: "aborted" });
               const inbox = await tx.doc(InboxDoc, api.conversationId);
@@ -737,19 +721,20 @@ export function createWorkers(
             control: { terminate: true as const },
           };
         const settled = await api.waitForTask(target, ctx);
-        const artifacts = (await api.snapshot(DeliveryRecord, String(target), ctx))?.artifacts;
+        const receipt = await api.snapshot(DeliveryRecord, String(target), ctx);
+        const presentation = receipt?.presentation;
         return {
           ...reply(
             `Subagent ${settled.state.outcome.status === "completed" ? "result" : settled.state.outcome.status}. Session ID: ${workerId}\n\n${
               typeof settled.state.outcome.result === "string"
-                ? reportWithArtifacts(
-                    reportWithAttachments(settled.state.outcome.result, artifacts?.sentFiles),
-                    artifacts,
-                  )
+                ? describePresentation(settled.state.outcome.result, presentation)
                 : ""
             }`.trimEnd(),
           ),
-          details: artifacts ?? {},
+          details:
+            presentation && receipt?.joinPresentationTask === api.taskId
+              ? { presentation: presentation as unknown as JsonValue }
+              : {},
         };
       }
       if (args.action === "await")
@@ -784,6 +769,7 @@ export function createWorkers(
               args.files,
               api,
               ctx,
+              services.resolveFileSource,
             )
           : []);
       if (args.action === "steer") {

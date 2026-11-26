@@ -195,11 +195,11 @@ describe("durable tool bridge", () => {
     const names = tools.extension.tools!.map((tool) => tool.name);
     expect(names.every((name) => /^[a-z][a-z0-9_]*$/.test(name))).toBe(true);
     const discovered = await run(
-      'return { names: (await searchTools("attach", {namespace: "attach_"})).map(tool => tool.name).sort(), declaration: await describeTool("web_search") }',
+      'return { names: (await searchTools("import_files", {namespace: "import_"})).map(tool => tool.name).sort(), declaration: await describeTool("web_search") }',
     );
     expect(discovered.isError).toBe(false);
     expect(JSON.parse(discovered.content[0].text)).toMatchObject({
-      names: ["attach_artifacts", "attach_files"],
+      names: ["import_files"],
       declaration: expect.stringContaining("web_search"),
     });
     const invoked = await run('return await tools.web_search({action: "content"})');
@@ -211,9 +211,29 @@ describe("durable tool bridge", () => {
     const obsolete = await run('return await describeTool("web-search")');
     expect(obsolete.isError).toBe(true);
     expect(obsolete.content[0].text).toContain("Unknown tool: web-search");
-    const obsoleteInvocation = await run('return await tools["attach-files"]({paths: []})');
+    const obsoleteInvocation = await run('return await tools["attach_files"]({paths: []})');
     expect(obsoleteInvocation.isError).toBe(true);
     expect(obsoleteInvocation.details.calls).toEqual([]);
+  });
+
+  it("passes the single message selection contract to the model", async () => {
+    const { faux, main } = await fixture();
+    faux.setResponses([
+      (request) => {
+        const prompt = JSON.stringify(
+          request.messages.filter((message) => message.role === "system"),
+        );
+        expect(prompt.match(/<batty-attachments>/g)).toHaveLength(1);
+        expect(prompt).toContain("import_files or sites action=create");
+        expect(prompt).toContain('action:\\"report\\"');
+        expect(prompt).not.toMatch(/attach_artifacts|attach_files/);
+        return fauxAssistantMessage("prompt checked");
+      },
+    ]);
+    const result = await (
+      await main.submit({ type: "input", content: "Deliver a file" }, BACKGROUND_CONTEXT)
+    ).wait(BACKGROUND_CONTEXT);
+    expect(result.status).toBe("done");
   });
 
   it.skipIf(process.platform !== "win32")(

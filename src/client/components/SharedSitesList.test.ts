@@ -30,6 +30,7 @@ test.each(["/", "/batty", "/nested/app"])(
         props: { sites: [stored] },
         global: {
           stubs: {
+            SitePopover: false,
             FullPopover: {
               name: "FullPopover",
               template: "<div><slot name='header-actions'/><slot/></div>",
@@ -39,7 +40,7 @@ test.each(["/", "/batty", "/nested/app"])(
       });
       try {
         const url = `${prefix}/sites/${site.id}/`;
-        expect(wrapper.get("iframe").attributes("src")).toBe(url);
+        expect(wrapper.find("iframe").exists()).toBe(false);
         const popover = wrapper.getComponent({ name: "FullPopover" });
         expect(popover.attributes("subtitle")).toBe(new URL(url, window.location.href).href);
         popover.vm.$emit("toggle", { newState: "open" });

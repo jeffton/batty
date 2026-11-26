@@ -2,19 +2,17 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { isPiShellToolName } from "@/shared/pi-tools";
 import type {
-  AgentTurnFileChange,
   SentFileDescriptor,
   SessionState,
-  SiteAttachmentDescriptor,
   ToolExecutionDetails,
   UiAssistantTurnPhase,
   UiContentBlock,
   UiMessage,
 } from "@/shared/types";
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
-import { agentTurnArtifactsByReplyEntryId } from "./agent-turn-file-changes";
 import { buildRuntimeNoticeMessage, decodeRuntimeNotice } from "./runtime-notices";
 import { decodeSiteAttachmentDescriptor } from "./site-attachments";
+import { attachmentText, type MessagePresentation } from "./message-presentation";
 import { projectUiMetadata } from "./ui-artifact-projection";
 
 export type UiImageResolver = (image: {
@@ -24,6 +22,7 @@ export type UiImageResolver = (image: {
 
 interface NormalizeOptions {
   imageResolver?: UiImageResolver;
+  streamingAssistant?: boolean;
   includeToolDetails?: boolean;
   includedToolCallIds?: ReadonlySet<string>;
 }
@@ -36,9 +35,7 @@ interface AssistantLikeMessage {
   provider?: string;
   stopReason?: string;
   errorMessage?: string;
-  battyFileChanges?: AgentTurnFileChange[];
-  battySentFiles?: SentFileDescriptor[];
-  battySites?: SiteAttachmentDescriptor[];
+  battyPresentation?: MessagePresentation;
 }
 
 interface ToolResultLikeMessage {
@@ -84,14 +81,12 @@ function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefine
 function normalizeCustomData(data: unknown): CustomMessageData | undefined {
   if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
   const result = projectUiMetadata(data as CustomMessageData);
-  const artifacts = result.runtimeResultArtifacts as ToolExecutionDetails | undefined;
-  return artifacts
-    ? { ...result, runtimeResultArtifacts: normalizeToolDetails(artifacts) }
-    : result;
+  const artifacts = result.runtimePresentation as ToolExecutionDetails | undefined;
+  return artifacts ? { ...result, runtimePresentation: normalizeToolDetails(artifacts) } : result;
 }
 
 const UPLOADED_FILE_REFERENCE_PATTERN =
-  /<file name="([^"]*)" mimeType="([^"]*)" size="(\d+)" path="[^"]*" url="([^"]*)"><\/file>/g;
+  /<file name="([^"]*)" mimeType="([^"]*)" size="(\d+)" path="[^"]*" url="([^"]*)"(?: artifactRef="file:[0-9a-f]+")?><\/file>/g;
 
 function decodeXmlAttribute(value: string): string {
   return value
@@ -305,13 +300,7 @@ export function normalizeMessage(
     if (notice) {
       const direct = notice.data?.directDelivery as { text: string } | undefined;
       if (notice.kind === "cron" && direct) {
-        const artifacts = notice.data?.runtimeResultArtifacts as
-          | {
-              sentFiles?: SentFileDescriptor[];
-              sites?: SiteAttachmentDescriptor[];
-              fileChanges?: AgentTurnFileChange[];
-            }
-          | undefined;
+        const presentation = notice.data?.runtimePresentation as MessagePresentation | undefined;
         return {
           id: messageId("assistant", message.timestamp, index),
           role: "assistant",
@@ -320,9 +309,10 @@ export function normalizeMessage(
           stopReason: "stop",
           directDelivery: notice.data!.cron as { sessionId: string; runId: string },
           blocks: [{ type: "text", text: direct.text }],
-          sentFiles: artifacts?.sentFiles,
-          sites: artifacts?.sites?.map(decodeSiteAttachmentDescriptor),
-          fileChanges: artifacts?.fileChanges,
+          sentFiles: presentation?.sentFiles,
+          sites: presentation?.sites?.map(decodeSiteAttachmentDescriptor),
+          fileChanges: presentation?.fileChanges,
+          ...(presentation?.historical ? { historicalPresentation: true as const } : {}),
         };
       }
       return normalizeMessage(buildRuntimeNoticeMessage(notice, message.timestamp), index, options);
@@ -341,19 +331,24 @@ export function normalizeMessage(
 
   if (message.role === "assistant") {
     const assistant = message as AssistantLikeMessage;
+    const blocks = normalizeBlocks(assistant.content, options);
+    const streamingText =
+      options.streamingAssistant && blocks.findLast((block) => block.type === "text");
+    if (streamingText) streamingText.text = attachmentText(streamingText.text);
     return {
       id: messageId("assistant", assistant.timestamp, index),
       role: "assistant",
       timestamp: assistant.timestamp,
       turnPhase: assistantTurnPhase(assistant),
-      blocks: normalizeBlocks(assistant.content, options),
+      blocks,
       model: assistant.model,
       provider: assistant.provider,
       stopReason: assistant.stopReason,
       errorMessage: assistant.errorMessage,
-      fileChanges: assistant.battyFileChanges,
-      sentFiles: assistant.battySentFiles,
-      sites: assistant.battySites?.map(decodeSiteAttachmentDescriptor),
+      fileChanges: assistant.battyPresentation?.fileChanges,
+      sentFiles: assistant.battyPresentation?.sentFiles,
+      sites: assistant.battyPresentation?.sites?.map(decodeSiteAttachmentDescriptor),
+      ...(assistant.battyPresentation?.historical ? { historicalPresentation: true as const } : {}),
     };
   }
 
@@ -423,67 +418,6 @@ export function normalizeMessages(
     .filter((message): message is UiMessage => Boolean(message));
 }
 
-type TranscriptSessionEntry = {
-  type?: unknown;
-  id?: unknown;
-  message?: unknown;
-  customType?: unknown;
-  content?: unknown;
-  timestamp?: unknown;
-  data?: unknown;
-  details?: unknown;
-  display?: boolean;
-};
-
-export function transcriptMessagesFromSessionEntries(
-  entries: TranscriptSessionEntry[],
-  metadataEntries: TranscriptSessionEntry[] = entries,
-): AgentMessage[] {
-  const artifactsByReplyId = agentTurnArtifactsByReplyEntryId(metadataEntries);
-  return entries.flatMap((entry) => {
-    if (entry?.type === "message" && entry.message) {
-      const message = entry.message as AgentMessage;
-      const artifacts =
-        message.role === "assistant" && typeof entry.id === "string"
-          ? artifactsByReplyId.get(entry.id)
-          : undefined;
-      return artifacts
-        ? [
-            {
-              ...message,
-              ...(artifacts.fileChanges !== undefined
-                ? { battyFileChanges: artifacts.fileChanges }
-                : {}),
-              ...(artifacts.sentFiles?.length ? { battySentFiles: artifacts.sentFiles } : {}),
-              ...(artifacts.sites?.length ? { battySites: artifacts.sites } : {}),
-            } as unknown as AgentMessage,
-          ]
-        : [message];
-    }
-
-    if (entry?.type === "custom_message" && typeof entry.customType === "string") {
-      const timestamp =
-        typeof entry.timestamp === "number"
-          ? entry.timestamp
-          : typeof entry.timestamp === "string"
-            ? Date.parse(entry.timestamp)
-            : Date.now();
-      return [
-        {
-          role: "custom",
-          customType: entry.customType,
-          content: entry.content,
-          timestamp,
-          display: entry.display,
-          details: normalizeCustomData(entry.details),
-        } as unknown as AgentMessage,
-      ];
-    }
-
-    return [];
-  });
-}
-
 export interface SessionStateInput {
   id: string;
   sessionId: string;
@@ -515,6 +449,7 @@ export interface SessionStateInput {
   revision?: number;
   streamId?: string;
   imageResolver?: UiImageResolver;
+  streamingAssistant?: boolean;
 }
 
 export function createSessionState(input: SessionStateInput): SessionState {
@@ -526,6 +461,7 @@ export function createSessionState(input: SessionStateInput): SessionState {
   const activeAssistant =
     !activeAssistantPersisted && input.activeAssistant?.role === "assistant"
       ? (normalizeMessage(input.activeAssistant, Number.MAX_SAFE_INTEGER, {
+          streamingAssistant: true,
           imageResolver: input.imageResolver,
         }) as Extract<UiMessage, { role: "assistant" }> | undefined)
       : undefined;

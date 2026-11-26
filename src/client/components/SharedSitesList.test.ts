@@ -18,12 +18,8 @@ const site: SiteDescriptor = {
   public: false,
 };
 
-function opened(site: SiteDescriptor) {
-  return { site, sites: [site] };
-}
-
 function mountSites(stored: SiteDescriptor, idPrefix = "") {
-  vi.mocked(openSite).mockResolvedValue(opened(stored));
+  vi.mocked(openSite).mockResolvedValue(stored);
   return shallowMount(SharedSitesList, {
     props: { sites: [stored], idPrefix },
     global: {

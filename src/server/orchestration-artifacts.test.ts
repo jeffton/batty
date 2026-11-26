@@ -3,7 +3,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
-import { fileLibraryRef, siteLibraryRef } from "@/shared/artifact-library";
+import { fileArtifactRef, siteArtifactRef } from "@/shared/artifacts";
 import { OrchestrationDoc } from "./orchestration.js";
 import { DeliveryRecord } from "./orchestration-history";
 import { orchestrationHistory } from "./orchestration-test-history";
@@ -31,8 +31,8 @@ test.each(["assistant", "direct"] as const)(
       public: false as const,
     };
     const draft = { ...site, id: "draft", name: "Unselected draft" };
-    const fileRef = fileLibraryRef(file.id);
-    const siteRef = siteLibraryRef(site.id);
+    const fileRef = fileArtifactRef(file.id);
+    const siteRef = siteArtifactRef(site.id);
     const { faux, orchestration, open, registry } = await fixture(
       10_000,
       console.error,

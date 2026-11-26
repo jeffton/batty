@@ -4,7 +4,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
-import { siteLibraryRef } from "@/shared/artifact-library";
+import { siteArtifactRef } from "@/shared/artifacts";
 import { fixture, until, withAttachments } from "./orchestration-test-fixture";
 import { entryMessages } from "./runtime";
 import { decodeRuntimeNotice } from "./runtime-notices";
@@ -30,7 +30,7 @@ const artifacts = {
   ],
 };
 
-const siteRef = siteLibraryRef(artifacts.sites[0]!.id);
+const siteRef = siteArtifactRef(artifacts.sites[0]!.id);
 
 test("discovery paginates and exposes selected refs without attaching inspected artifacts", async () => {
   const { faux, registry, orchestration, open } = await fixture(

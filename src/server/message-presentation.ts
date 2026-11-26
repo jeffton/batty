@@ -4,8 +4,8 @@ import type {
   SentFileDescriptor,
   SiteAttachmentDescriptor,
 } from "@/shared/types";
-import { fileLibraryRef, siteLibraryRef } from "@/shared/artifact-library";
-import type { ArtifactLibrary } from "./artifact-library";
+import { fileArtifactRef, siteArtifactRef } from "@/shared/artifacts";
+import type { ArtifactResolver } from "./artifact-resolver";
 import { decodeSiteAttachmentDescriptor } from "./site-attachments";
 
 export interface MessagePresentation {
@@ -100,15 +100,12 @@ export function extractSelection(message: AssistantMessage): AttachmentSelection
 }
 
 export async function resolvePresentation(
-  library: ArtifactLibrary,
+  resolver: ArtifactResolver,
   { artifactRefs, browserId }: AttachmentSelection,
   browser: (id: string) => Promise<Extract<SiteAttachmentDescriptor, { kind: "browser" }>>,
 ): Promise<MessagePresentation> {
-  const items = artifactRefs?.length ? await library.resolve(artifactRefs) : [];
-  const sentFiles = items.flatMap((item) => (item.kind === "file" ? [item.file!] : []));
-  const sites: SiteAttachmentDescriptor[] = items.flatMap((item) =>
-    item.kind === "site" ? [item.site!] : [],
-  );
+  const { sentFiles, sites: localSites } = await resolver.resolve(artifactRefs ?? []);
+  const sites: SiteAttachmentDescriptor[] = localSites;
   if (browserId) sites.push(await browser(browserId));
   return {
     ...(sentFiles.length ? { sentFiles } : {}),
@@ -119,12 +116,12 @@ export async function resolvePresentation(
 export function describePresentation(text: string, presentation?: MessagePresentation): string {
   const refs = [
     ...(presentation?.sentFiles ?? []).map((file) =>
-      JSON.stringify({ ref: fileLibraryRef(file.id), name: file.name }),
+      JSON.stringify({ ref: fileArtifactRef(file.id), name: file.name }),
     ),
     ...(presentation?.sites ?? [])
       .map(decodeSiteAttachmentDescriptor)
       .filter((site) => site.kind === "site")
-      .map((site) => JSON.stringify({ ref: siteLibraryRef(site.id), name: site.name })),
+      .map((site) => JSON.stringify({ ref: siteArtifactRef(site.id), name: site.name })),
   ];
   const errors = presentation?.importErrors ?? [];
   return [

@@ -6,7 +6,7 @@ import { getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import { Runtime, context } from "./runtime";
 import { resolveSentFile } from "./send-files";
 import { preparePromptFiles } from "./uploads";
-import { ArtifactLibrary } from "./artifact-library";
+import { ArtifactResolver } from "./artifact-resolver";
 import {
   test,
   storageRoot,
@@ -91,16 +91,13 @@ export function registerRemoteWorkerExecutionTests() {
           await connect(local, remote);
         }
         await writeFile(join(remote.work, "private-draft.txt"), "unselected draft bytes");
-        await preparePromptFiles(
+        const upload = await preparePromptFiles(
           remote.config.uploadsDir,
           String(remote.runtime.main.id),
           [{ filename: "selected-input.txt", data: Buffer.from("owner uploaded bytes") }],
           remote.config.baseUrl,
         );
-        const library = new ArtifactLibrary(remote.config);
-        const selectedUpload = (await library.list()).find(
-          (item) => item.title === "selected-input.txt",
-        )!;
+        const selectedUploadRef = /artifactRef="([^"]+)"/.exec(upload.text)![1]!;
         let bModelCalls = 0;
         remote.faux.setResponses([
           (request) => {
@@ -140,7 +137,7 @@ export function registerRemoteWorkerExecutionTests() {
                 fauxToolCall("subagent", {
                   action: "report",
                   prompt: "B progress with evidence",
-                  artifactRefs: [importedRef(request, "origin.txt"), selectedUpload.ref],
+                  artifactRefs: [importedRef(request, "origin.txt"), selectedUploadRef],
                 }),
               ],
               { stopReason: "toolUse" },
@@ -256,8 +253,8 @@ export function registerRemoteWorkerExecutionTests() {
         expect(progress).not.toHaveProperty("details");
         expect(JSON.stringify(progress)).not.toContain(remote.config.sentFilesDir);
         expect(
-          (await library.list()).filter((item) => item.title === "selected-input.txt"),
-        ).toHaveLength(1);
+          (await new ArtifactResolver(remote.config).resolve([selectedUploadRef])).sentFiles,
+        ).toMatchObject([{ name: "selected-input.txt" }]);
 
         // A status request can fail after the last terminal catalog commit; reconnect must resync it.
         remote.failNextAssignmentRequest();

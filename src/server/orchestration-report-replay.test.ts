@@ -3,7 +3,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
-import { siteLibraryRef } from "@/shared/artifact-library";
+import { siteArtifactRef } from "@/shared/artifacts";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { fixture, until } from "./orchestration-test-fixture";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
@@ -16,7 +16,7 @@ test("report accepted before tool settlement is delivered once across restart", 
     url: "/report-replay",
     public: false as const,
   };
-  const siteRef = siteLibraryRef(site.id);
+  const siteRef = siteArtifactRef(site.id);
   const resolve = vi.fn(async () => ({ sites: [site] }));
   const { faux, orchestration, open, registry } = await fixture(
     10_000,

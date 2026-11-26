@@ -13,7 +13,7 @@ import type { AppConfig } from "./config";
 import { workspaceBrowserKey, type BrowserService } from "./browser-service";
 import { storeSentFiles } from "./send-files";
 import { describePresentation } from "./message-presentation";
-import { siteLibraryRef } from "@/shared/artifact-library";
+import { siteArtifactRef } from "@/shared/artifacts";
 import { createSite, deleteSite } from "./sites";
 import { registerSiteFunction, deleteSiteFunction } from "./site-functions";
 import { runWebSearch } from "./web-search";
@@ -302,7 +302,7 @@ export function createSitesTool({
           content: [
             {
               type: "text",
-              text: `Created site ${site.descriptor.id}.\nArtifact ref: ${siteLibraryRef(site.descriptor.id)}\nDirectory: ${site.directory}\nUser URL: ${site.descriptor.url}\nBrowser URL: ${site.browserUrl}`,
+              text: `Created site ${site.descriptor.id}.\nArtifact ref: ${siteArtifactRef(site.descriptor.id)}\nDirectory: ${site.directory}\nUser URL: ${site.descriptor.url}\nBrowser URL: ${site.browserUrl}`,
             },
           ],
           details: {},

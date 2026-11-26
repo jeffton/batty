@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import mime from "mime-types";
-import { fileLibraryRef } from "@/shared/artifact-library";
+import { fileArtifactRef } from "@/shared/artifacts";
 import type { SentFileDescriptor } from "@/shared/types";
 import { missingFile, storageDirectories, storageEntries } from "./artifact-storage";
 import { prepareProviderImage } from "./provider-images";
@@ -92,7 +92,7 @@ export function uploadedPreviewPath(uploadsDir: string, filePath: string) {
   return path.join(uploadsDir, ".previews", `${id}.webp`);
 }
 
-export async function* storedUploadedFiles(uploadsDir: string, baseUrl: string, fileId?: string) {
+export async function* storedUploadedFiles(uploadsDir: string, baseUrl: string, fileId: string) {
   for (const session of await storageDirectories(uploadsDir)) {
     const sessionId = path.basename(session);
     if (sessionId.startsWith(".")) continue;
@@ -103,15 +103,13 @@ export async function* storedUploadedFiles(uploadsDir: string, baseUrl: string, 
         if (!entry.isFile()) continue;
         const { name } = entry;
         const id = uploadedFileId(sessionId, batchId, name);
-        if (fileId !== undefined && id !== fileId) continue;
+        if (id !== fileId) continue;
         try {
           const storedPath = path.join(batch, name);
           const stats = await fs.stat(storedPath);
           yield {
             storedPath,
             file: uploadedFileDescriptor(id, baseUrl, sessionId, batchId, name, stats.size),
-            createdAt: stats.mtimeMs,
-            location: { sessionId, batchId, storedName: name },
           };
         } catch (error) {
           if (!missingFile(error)) throw error;
@@ -167,7 +165,7 @@ async function writePromptBatch(
       result.images.push(await prepareProviderImage({ type: "image", mimeType, data }));
       result.uploadedImages.push({ name, storedName, batchId, mimeType, size, data, url });
     }
-    const artifactRef = fileLibraryRef(uploadedFileId(sessionId, batchId, storedName));
+    const artifactRef = fileArtifactRef(uploadedFileId(sessionId, batchId, storedName));
     result.text += `<file name="${escapeXmlAttribute(name)}" mimeType="${escapeXmlAttribute(mimeType)}" size="${size}" path="${escapeXmlAttribute(filePath)}" url="${escapeXmlAttribute(url)}" artifactRef="${artifactRef}"></file>\n`;
   }
 }

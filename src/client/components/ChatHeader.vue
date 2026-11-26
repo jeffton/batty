@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Archive, Wrench, Clock3, Globe } from "@lucide/vue";
+import { PanelsTopLeft, Wrench, Clock3, Globe } from "@lucide/vue";
 import { nextTick, ref } from "vue";
 import { openCloudBrowser } from "@/client/lib/api";
 import BrowserPopover from "./BrowserPopover.vue";
@@ -9,7 +9,7 @@ import { withBaseUrl } from "@/client/lib/base-url";
 import SettingsPopover from "./SettingsPopover.vue";
 import ToolsPopover from "./ToolsPopover.vue";
 import CronPopover from "./CronPopover.vue";
-import ArtifactLibraryPopover from "./ArtifactLibraryPopover.vue";
+import SiteSwitcherPopover from "./SiteSwitcherPopover.vue";
 import SessionHeaderStatus from "./SessionHeaderStatus.vue";
 import ProviderUsageIndicator from "./ProviderUsageIndicator.vue";
 const store = useAppStore();
@@ -84,11 +84,11 @@ async function logout() {
       <button
         type="button"
         class="header__button chrome-button chrome-button--icon"
-        popovertarget="artifact-library"
-        aria-label="Artifacts"
-        title="Artifacts"
+        popovertarget="site-switcher"
+        aria-label="Sites"
+        title="Sites"
       >
-        <Archive :size="17" />
+        <PanelsTopLeft :size="17" />
       </button>
     </div>
     <BrowserPopover
@@ -114,7 +114,7 @@ async function logout() {
     />
     <ToolsPopover popover-id="tools-popover" anchor-name="--tools-anchor" />
     <CronPopover popover-id="workers-popover" anchor-name="--workers-anchor" />
-    <ArtifactLibraryPopover popover-id="artifact-library" />
+    <SiteSwitcherPopover popover-id="site-switcher" />
   </header>
 </template>
 <style scoped>

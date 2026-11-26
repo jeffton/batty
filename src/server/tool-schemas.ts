@@ -81,7 +81,7 @@ export const ImportFilesToolSchema = Type.Object(
   {
     paths: Type.Array(Type.String({ description: "Path to a file to import." }), {
       minItems: 1,
-      description: "Files to snapshot into the local artifact library.",
+      description: "Files to snapshot and return as artifact refs.",
     }),
   },
   {

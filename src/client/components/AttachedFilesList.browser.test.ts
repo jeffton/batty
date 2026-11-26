@@ -152,98 +152,132 @@ test("chromium: attachment popover zooms without navigation and downloads authen
   }
 }, 30_000);
 
-test("chromium: text attachments in user, assistant and worker messages share the preview and download flow", async () => {
-  const fixture = "src/client/components/TextAttachmentMessages.fixture.html";
-  const server = await createBrowserFixtureServer(fixture, {
-    plugins: [vue()],
-    resolve: { alias: { "@": path.resolve("src") } },
-    server: { host: "127.0.0.1", port: 0 },
-  });
-  await server.listen();
-  const origin = server.resolvedUrls!.local[0]!;
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const context = await browser.newContext({
-      viewport: { width: 390, height: 844 },
-      hasTouch: true,
+test.each([
+  { name: "desktop", width: 1280, height: 840, touch: false },
+  { name: "mobile", width: 320, height: 660, touch: true },
+])(
+  "chromium: text in user, assistant and worker attachments previews and downloads on $name",
+  async ({ width, height, touch }) => {
+    const fixture = "src/client/components/TextAttachmentMessages.fixture.html";
+    const server = await createBrowserFixtureServer(fixture, {
+      plugins: [vue()],
+      resolve: { alias: { "@": path.resolve("src") } },
+      server: { host: "127.0.0.1", port: 0 },
     });
-    const page = await context.newPage();
-    const previewRequests: string[] = [];
-    const samples = [
-      {
-        path: "/api/uploads/1/batch/upload.log",
-        name: "upload.log",
-        text: "[debug] Warm start 🦾",
-        source: "user",
-      },
-      {
-        path: "/api/sent-files/work/2/tool/report",
-        name: "report.txt",
-        text: "Saved the report",
-        source: "custom",
-      },
-      {
-        path: "/api/sent-files/work/2/tool/binary",
-        name: "binary.log",
-        bytes: Buffer.of(0, 20, 255),
-        source: "custom",
-      },
-      {
-        path: "/api/sent-files/work/1/tool/output",
-        name: "output.ts",
-        text: "export const age = 12;",
-        source: "assistant",
-      },
-    ];
-    for (const sample of samples) {
-      await page.route(new URL(sample.path, origin).href + "?text=1", (route) => {
-        previewRequests.push(sample.name);
-        if (sample.bytes)
+    await server.listen();
+    const origin = server.resolvedUrls!.local[0]!;
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const context = await browser.newContext({
+        viewport: { width, height },
+        hasTouch: touch,
+        isMobile: touch,
+      });
+      const page = await context.newPage();
+      const activate = (target: ReturnType<typeof page.locator>) =>
+        touch ? target.tap() : target.click();
+      const previewRequests: string[] = [];
+      const samples = [
+        {
+          path: "/api/uploads/1/batch/upload.log",
+          name: "upload.log",
+          text: "[debug] Warm start 🦾",
+          tail: "\n[DEBUG] More lines beyond the preview boundary".repeat(2000),
+          source: "user",
+        },
+        {
+          path: "/api/sent-files/work/2/tool/report",
+          name: "report.txt",
+          text: "Saved the report",
+          source: "custom",
+        },
+        {
+          path: "/api/sent-files/work/2/tool/binary",
+          name: "binary.log",
+          bytes: Buffer.of(0, 20, 255),
+          source: "custom",
+        },
+        {
+          path: "/api/sent-files/work/1/tool/output",
+          name: "output.ts",
+          text: `export const message = "${"A long highlighted line ".repeat(20)}";`,
+          source: "assistant",
+        },
+      ];
+      for (const sample of samples) {
+        await page.route(new URL(sample.path, origin).href + "?text=1", (route) => {
+          previewRequests.push(sample.name);
+          if (sample.bytes)
+            return route.fulfill({
+              status: 415,
+              json: { error: "This file is not UTF-8 text." },
+            });
           return route.fulfill({
-            status: 415,
-            json: { error: "This file is not UTF-8 text." },
+            body: sample.text,
+            contentType: "text/plain; charset=utf-8",
+            headers: sample.tail ? { "X-Batty-Preview-Truncated": "1" } : {},
           });
-        return route.fulfill({ body: sample.text, contentType: "text/plain; charset=utf-8" });
-      });
-      await page.route(new URL(sample.path, origin).href + "?download=1", (route) =>
-        route.fulfill({ body: sample.bytes ?? sample.text, contentType: "text/plain" }),
-      );
-    }
-    await page.goto(origin + fixture);
-    expect(previewRequests).toEqual([]);
-    for (const sample of samples) {
-      const card = page.locator(`.message--${sample.source} .attached-files__card`).filter({
-        has: page.getByText(sample.name, { exact: true }),
-      });
-      const trigger = card.getByRole("button", { name: `Preview ${sample.name}` });
-      await trigger.tap();
-      const preview = page.getByRole("dialog", { name: sample.name, exact: true });
-      if (sample.bytes) {
-        const alert = preview.getByRole("alert");
-        await alert.waitFor();
-        expect(await alert.textContent()).toContain("This file is not UTF-8 text.");
-      } else {
-        const line = preview.locator("[data-line]");
-        await line.waitFor();
-        expect(await line.textContent()).toBe(sample.text);
+        });
+        await page.route(new URL(sample.path, origin).href + "?download=1", (route) =>
+          route.fulfill({
+            body: sample.bytes ?? sample.text + (sample.tail ?? ""),
+            contentType: "text/plain",
+          }),
+        );
       }
-      const download = page.waitForEvent("download");
-      await preview.getByRole("link", { name: "Download file" }).tap();
-      const result = await download;
-      expect(result.suggestedFilename()).toBe(sample.name);
-      expect(await buffer(await result.createReadStream())).toEqual(
-        sample.bytes ?? Buffer.from(sample.text),
-      );
-      await preview.getByRole("button", { name: "Close file preview" }).tap();
-      await preview.waitFor({ state: "hidden" });
-      expect(await card.getByRole("link", { name: "Download", exact: true }).isVisible()).toBe(
-        true,
-      );
+      await page.goto(origin + fixture);
+      expect(previewRequests).toEqual([]);
+      for (const sample of samples) {
+        const card = page.locator(`.message--${sample.source} .attached-files__card`).filter({
+          has: page.getByText(sample.name, { exact: true }),
+        });
+        const trigger = card.getByRole("button", { name: `Preview ${sample.name}` });
+        await activate(trigger);
+        const preview = page.getByRole("dialog", { name: sample.name, exact: true });
+        if (sample.bytes) {
+          const alert = preview.getByRole("alert");
+          await alert.waitFor();
+          expect(await alert.textContent()).toContain("This file is not UTF-8 text.");
+        } else {
+          const line = preview.locator("[data-line]");
+          await line.waitFor();
+          expect(await line.textContent()).toBe(sample.text);
+          expect(
+            await preview.getByText("Preview truncated. Download the full file.").isVisible(),
+          ).toBe(Boolean(sample.tail));
+          if (sample.source === "assistant") {
+            await expect.poll(() => line.locator("span").count()).toBeGreaterThan(1);
+            const lineHeight = () =>
+              line.evaluate((element) => element.getBoundingClientRect().height);
+            const wrapped = await lineHeight();
+            const wrap = preview.getByRole("button", { name: "Wrap lines" });
+            expect(await wrap.getAttribute("aria-pressed")).toBe("true");
+            await activate(wrap);
+            expect(await wrap.getAttribute("aria-pressed")).toBe("false");
+            await expect.poll(lineHeight).toBeLessThan(wrapped);
+            await activate(wrap);
+            await expect.poll(lineHeight).toBe(wrapped);
+          }
+        }
+        const download = page.waitForEvent("download");
+        await activate(preview.getByRole("link", { name: "Download file" }));
+        const result = await download;
+        expect(result.suggestedFilename()).toBe(sample.name);
+        expect(await buffer(await result.createReadStream())).toEqual(
+          sample.bytes ?? Buffer.from(sample.text + (sample.tail ?? "")),
+        );
+        await activate(preview.getByRole("button", { name: "Close file preview" }));
+        await preview.waitFor({ state: "hidden" });
+        expect(await card.getByRole("link", { name: "Download", exact: true }).isVisible()).toBe(
+          true,
+        );
+      }
+      expect(previewRequests).toEqual(samples.map((sample) => sample.name));
+      expect(page.url()).toBe(origin + fixture);
+    } finally {
+      await browser.close();
+      await closeBrowserFixtureServer(server);
     }
-    expect(previewRequests).toEqual(samples.map((sample) => sample.name));
-    expect(page.url()).toBe(origin + fixture);
-  } finally {
-    await browser.close();
-    await closeBrowserFixtureServer(server);
-  }
-}, 30_000);
+  },
+  30_000,
+);

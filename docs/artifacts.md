@@ -1,6 +1,8 @@
 # Artifacts
 
-The private library lists uploads, imported/generated files (including worker evidence), and local sites with a usable home page. Identical generated files with the same name share a row; original refs and downloads stay intact. Text files open in a read-only code view. Long previews are shortened; downloads retain the full file. Sites open their current version. Starred items appear first, then newest first. Diffs and live browsers stay on messages.
+The Sites button opens the most recently viewed local site. The preview header fits as many recent tabs as space allows; **More** lists the rest. If no site has been viewed, the button opens the chooser.
+
+Files are available from their messages, including worker reports. Text files open in a read-only code view, with wrap and full download. Diffs and live browsers stay on messages.
 
 Use `import_files` or `sites` with `action: "create"` to get refs. To attach them to a reply, including a cron or worker final, append a blank line followed by:
 

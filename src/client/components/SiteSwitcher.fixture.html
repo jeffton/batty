@@ -6,9 +6,10 @@
   <body>
     <div id="app"></div>
     <script type="module">
-      import { createApp } from "vue";
+      import { createApp, h } from "vue";
       import { createPinia } from "pinia";
       import ChatHeader from "./ChatHeader.vue";
+      import SharedSitesList from "./SharedSitesList.vue";
       import { useAppStore } from "../stores/app";
       import "../styles.css";
 
@@ -16,12 +17,26 @@
       const pinia = createPinia();
       const store = useAppStore(pinia);
       Object.assign(store.settings, {
-        pushTitle: "Artifact fixture",
+        pushTitle: "Sites fixture",
         memoryModel: "fixture/model",
         memoryReasoning: "medium",
         memoryLanguage: "English",
       });
-      createApp(ChatHeader).use(pinia).mount("#app");
+      const attachment = {
+        kind: "site",
+        id: "attached",
+        name: "Chat attachment",
+        url: "/old/sites/attached/",
+        public: false,
+      };
+      createApp({
+        render: () => [
+          h(ChatHeader),
+          h(SharedSitesList, { sites: [attachment], idPrefix: "chat" }),
+        ],
+      })
+        .use(pinia)
+        .mount("#app");
     </script>
   </body>
 </html>

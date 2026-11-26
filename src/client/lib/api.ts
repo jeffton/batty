@@ -169,6 +169,12 @@ export function expandMemoryNode(id: number, count: number) {
 export function getSite(siteId: string, signal?: AbortSignal) {
   return query("site.get", { siteId }, signal);
 }
+export function getSiteCatalog(signal?: AbortSignal) {
+  return query("site.catalog", {}, signal);
+}
+export function openSite(siteId: string) {
+  return value("site.open", { siteId });
+}
 export function setSitePublic(siteId: string, isPublic: boolean) {
   return value("site.public", { siteId, public: isPublic });
 }

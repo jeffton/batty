@@ -143,7 +143,7 @@ async function readManifest(
   return JSON.parse(await fs.readFile(manifestPath, "utf8")) as StoredSentFileManifest;
 }
 
-export async function* storedSentFiles(rootDir: string, baseUrl: string, fileId?: string) {
+export async function* storedSentFiles(rootDir: string, baseUrl: string, fileId: string) {
   for (const workspace of await storageDirectories(rootDir)) {
     const workspaceName = path.basename(workspace);
     if (workspaceName === NODE_EXPORTS_WORKSPACE) continue;
@@ -161,12 +161,10 @@ export async function* storedSentFiles(rootDir: string, baseUrl: string, fileId?
           );
           const { workspaceId, sessionId, toolCallId } = manifest;
           for (const file of manifest.files) {
-            if (fileId !== undefined && file.id !== fileId) continue;
+            if (file.id !== fileId) continue;
             yield {
               file: toDescriptor(baseUrl, workspaceId, sessionId, toolCallId, file),
-              createdAt: manifest.createdAt,
               storedPath: path.join(call, file.storedName),
-              location: { workspaceId, sessionId, toolCallId, fileId: file.id },
             };
           }
         } catch (error) {

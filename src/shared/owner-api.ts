@@ -4,6 +4,9 @@ import type { CloudBrowserState, CloudBrowserCredentialTarget } from "./cloud-br
 import type { MemoryTreeOverview, MemoryTreeExpansion } from "./memory-tree";
 import type { WorkspaceFilesResponse, WorkspaceFileSearchEvent } from "./workspace-files";
 
+export type SiteCatalog = { sites: Ui.SiteDescriptor[]; recentSiteIds: string[] };
+export type VisitedSite = SiteCatalog & { site: Ui.SiteDescriptor };
+
 /** Native owner operations. Inputs are domain values, never HTTP envelopes. */
 export type OwnerSessionEvent =
   | import("./types").ServerEvent
@@ -88,6 +91,8 @@ export interface OwnerInputs {
   "push.save": { subscription: PushSubscriptionJSON };
   "push.delete": { endpoint: string };
   "push.ack": { clientId: string; challengeId: string };
+  "site.catalog": Record<string, never>;
+  "site.open": { siteId: string };
   "site.get": { siteId: string };
   "site.public": { siteId: string; public: boolean };
   "site.call": { siteId: string; name: string; input: unknown };
@@ -192,6 +197,8 @@ export interface OwnerOutputs {
   "push.save": { ok: true };
   "push.delete": { ok: true };
   "push.ack": { ok: boolean };
+  "site.catalog": SiteCatalog;
+  "site.open": VisitedSite;
   "site.get": Ui.SiteDescriptor;
   "site.public": Ui.SiteDescriptor;
   "site.call": unknown;

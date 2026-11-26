@@ -260,7 +260,7 @@ test("keeps stream controls centered independently of the left and right compose
       const browserButton = header.getByRole("button", { name: "Open browser" });
       const cron = header.getByRole("button", { name: "Cron" });
       const tools = header.getByRole("button", { name: "Workspaces and tools" });
-      const artifacts = header.getByRole("button", { name: "Artifacts", exact: true });
+      const sites = header.getByRole("button", { name: "Sites", exact: true });
       const usage = header.getByRole("button", { name: "Usage limits" });
       const contextUsage = header.locator(".session-header-status__context");
       const connection = header.locator(".session-header-status__connection");
@@ -268,7 +268,7 @@ test("keeps stream controls centered independently of the left and right compose
         [settings, browserButton],
         [browserButton, cron],
         [cron, tools],
-        [tools, artifacts],
+        [tools, sites],
         [usage, contextUsage],
         [contextUsage, connection],
       ] as const) {
@@ -278,12 +278,11 @@ test("keeps stream controls centered independently of the left and right compose
       const connectionBox = (await connection.boundingBox())!;
       expect(settingsX).toBeGreaterThanOrEqual(sideInset + 4);
       expect(connectionBox.x + connectionBox.width).toBeLessThanOrEqual(width - sideInset - 4);
-      const artifactsBox = (await artifacts.boundingBox())!;
+      const sitesBox = (await sites.boundingBox())!;
       const usageBox = (await usage.boundingBox())!;
-      expect(artifactsBox.x + artifactsBox.width).toBeLessThanOrEqual(width - sideInset - 4);
-      if (usageBox.y === artifactsBox.y)
-        expect(await spacing(artifacts, usage)).toBeGreaterThanOrEqual(0);
-      else expect(usageBox.y).toBeGreaterThanOrEqual(artifactsBox.y + artifactsBox.height);
+      expect(sitesBox.x + sitesBox.width).toBeLessThanOrEqual(width - sideInset - 4);
+      if (usageBox.y === sitesBox.y) expect(await spacing(sites, usage)).toBeGreaterThanOrEqual(0);
+      else expect(usageBox.y).toBeGreaterThanOrEqual(sitesBox.y + sitesBox.height);
       expect(active.g!.x).toBeGreaterThanOrEqual(active.t!.x + active.t!.width - 1);
       expect(active.g!.x + active.g!.width).toBeLessThanOrEqual(active.d.x + 1);
       expect(active.g!.x + active.g!.width / 2).toBeCloseTo(width / 2, 0);
@@ -386,7 +385,7 @@ test("keeps stream controls centered independently of the left and right compose
       const compactConnectionBox = (await connection.boundingBox())!;
       expect(compactConnectionBox).toEqual({
         ...connectionBox,
-        y: connectionBox.y + Math.min(0, artifactsBox.y - usageBox.y),
+        y: connectionBox.y + Math.min(0, sitesBox.y - usageBox.y),
       });
     } finally {
       await context.close();

@@ -30,6 +30,7 @@ import { workspaceBrowserKey } from "./browser-service";
 import { CloudBrowserControlSchema } from "./browser-schemas";
 import { CloudBrowserCredentialsSchema } from "./cloud-browser-credentials-schema";
 import { getSite, setSitePublic } from "./sites";
+import { SiteRecents } from "./site-recents";
 import { executeSiteFunction } from "./site-functions";
 import type { BrowserErrorReport } from "../shared/browser-errors";
 import type { CronJob, CronRun } from "./orchestration";
@@ -95,6 +96,7 @@ function cronRunLog(runtime: Runtime, run: CronRun, jobs: CronJob[]): CronRunLog
 /** Explicit owner API. Authorization belongs to the authenticated socket boundary. */
 export function createOwnerRpcHandler(runtime: Runtime, services: OwnerRpcServices): RpcHandler {
   const { config } = runtime;
+  const siteRecents = new SiteRecents(config);
   const { webPush, passkeys, settingsStatus } = services;
   const { operations, add, streaming } = rpcRegistry<OwnerInputs, OwnerOutputs, OwnerEvents>(
     createSessionOperations(runtime, services),
@@ -339,10 +341,14 @@ export function createOwnerRpcHandler(runtime: Runtime, services: OwnerRpcServic
   add("push.ack", ({ clientId, challengeId }) => ({
     ok: webPush.foreground.acknowledge(clientId, challengeId),
   }));
+  add("site.catalog", () => siteRecents.catalog());
+  add("site.open", ({ siteId }) => {
+    if (typeof siteId !== "string") badInput("siteId must be a string");
+    return siteRecents.open(siteId);
+  });
   add("site.get", async ({ siteId }) => {
     if (typeof siteId !== "string") badInput("siteId must be a string");
-    const { descriptor } = await getSite(config.sitesDir, config.baseUrl, siteId);
-    return descriptor;
+    return (await getSite(config.sitesDir, config.baseUrl, siteId)).descriptor;
   });
   add("site.public", ({ siteId, public: isPublic }) => {
     if (typeof isPublic !== "boolean") badInput("public must be a boolean");

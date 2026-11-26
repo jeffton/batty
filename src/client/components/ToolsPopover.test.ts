@@ -55,7 +55,7 @@ describe("Workspaces and tools", () => {
         { name: "subagent", description: "Remote workspaces and model discovery" },
         { name: "cron", description: "Schedule workers" },
         { name: "memory_search", description: "Search main memory" },
-        { name: "import_files", description: "Import files into the artifact library" },
+        { name: "import_files", description: "Snapshot files and return artifact refs" },
         { name: "codemode", description: "Run nested tools" },
       ],
     });

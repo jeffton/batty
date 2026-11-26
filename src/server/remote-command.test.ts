@@ -8,7 +8,7 @@ import {
   type ConversationId,
   type Harness,
 } from "@earendil-works/pi-durable";
-import { fileLibraryRef } from "../shared/artifact-library";
+import { fileArtifactRef } from "../shared/artifacts";
 import { fixture, until, withAttachments } from "./orchestration-test-fixture";
 import { orchestrationHistory } from "./orchestration-test-history";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
@@ -111,10 +111,10 @@ test("remote reports and results persist only selected files; inspect and await 
   const reportFile = file("progress.txt");
   const resultFile = file("result.txt");
   const draft = file("draft.txt");
-  const reportRef = fileLibraryRef(reportFile.id);
-  const resultRef = fileLibraryRef(resultFile.id);
+  const reportRef = fileArtifactRef(reportFile.id);
+  const resultRef = fileArtifactRef(resultFile.id);
   const available = new Map(
-    [reportFile, resultFile, draft].map((item) => [fileLibraryRef(item.id), item]),
+    [reportFile, resultFile, draft].map((item) => [fileArtifactRef(item.id), item]),
   );
   const { faux, orchestration, open, registry } = await fixture(
     10_000,

@@ -10,8 +10,8 @@ import { defineExtension, defineTool, type ConversationId } from "@earendil-work
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
 import { fixture, until } from "./orchestration-test-fixture";
-import { fileLibraryRef } from "@/shared/artifact-library";
-import { ArtifactLibrary } from "./artifact-library";
+import { fileArtifactRef } from "@/shared/artifacts";
+import { ArtifactResolver } from "./artifact-resolver";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { storeSentFiles } from "./send-files";
 import {
@@ -309,8 +309,7 @@ test("a caller can send a received file ref, but cannot invent refs or use files
     undefined,
     undefined,
     (directory) => {
-      const library = new ArtifactLibrary({
-        battyDir: directory,
+      const library = new ArtifactResolver({
         sentFilesDir: join(directory, "sent-files"),
         sitesDir: join(directory, "sites"),
         uploadsDir: join(directory, "uploads"),
@@ -329,7 +328,7 @@ test("a caller can send a received file ref, but cannot invent refs or use files
     cwd: directory,
     paths: [original],
   });
-  const ref = fileLibraryRef(file!.id);
+  const ref = fileArtifactRef(file!.id);
   registry.install(
     defineExtension({
       name: "worker-file-seed",

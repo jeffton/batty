@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useId } from "vue";
-import { artifactTextUrl, isTextArtifactCandidate } from "@/shared/artifact-library";
+import { artifactTextUrl, isTextArtifactCandidate } from "@/shared/artifacts";
 import ArtifactTextPopover from "./ArtifactTextPopover.vue";
 import AttachedFileDownload from "./AttachedFileDownload.vue";
 import TranscriptImage from "./TranscriptImage.vue";

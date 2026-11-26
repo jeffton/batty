@@ -290,21 +290,40 @@ for (const baseUrl of ["/", "/batty"]) {
       (await get("/api/uploads/1/smoke/transport.ts?text=1", { headers: { cookie } })).status,
       415,
     );
-    const catalogFiles = [];
-    let cursor;
-    do {
-      const query = new URLSearchParams({ limit: "1", ...(cursor ? { after: cursor } : {}) });
-      const page = await (await get(`/api/artifacts?${query}`, { headers: { cookie } })).json();
-      assert.equal(page.artifacts.length, 1);
-      catalogFiles.push(...page.artifacts.filter((item) => item.kind === "file"));
-      cursor = page.nextCursor;
-    } while (cursor);
-    for (const name of ["performance.log", "source.ts"])
-      assert.match(catalogFiles.find((item) => item.title === name).textPreviewUrl, /\?text=1$/);
-    assert.equal(
-      catalogFiles.find((item) => item.title === "transport.ts").textPreviewUrl,
-      undefined,
-    );
+    const firstSite = "10000000-0000-0000-0000-000000000002";
+    const secondSite = "10000000-0000-0000-0000-000000000003";
+    const incompleteSite = "10000000-0000-0000-0000-000000000004";
+    const makeSite = async (id, ready) => {
+      const dir = path.join(root, ".batty/sites", id);
+      await fs.mkdir(path.join(dir, "content"), { recursive: true });
+      await fs.writeFile(
+        path.join(dir, "manifest.json"),
+        JSON.stringify({
+          id,
+          name: "Example",
+          public: false,
+          accessToken: "private-preview-token",
+          createdAt: Date.now(),
+        }),
+      );
+      if (ready) await fs.writeFile(path.join(dir, "content/index.html"), "<h1>Example</h1>");
+    };
+    await Promise.all([
+      makeSite(firstSite, true),
+      makeSite(secondSite, true),
+      makeSite(incompleteSite, false),
+    ]);
+    const sites = await call("site.catalog");
+    assert.deepEqual(sites.recentSiteIds, []);
+    assert.deepEqual(sites.sites.map(({ id }) => id).sort(), [firstSite, secondSite]);
+    assert(!JSON.stringify(sites).includes("private-preview-token"));
+    await call("site.open", { siteId: firstSite });
+    await call("site.open", { siteId: incompleteSite });
+    const resumedSite = await call("site.open", { siteId: secondSite });
+    assert.equal(resumedSite.site.id, secondSite);
+    assert.equal(resumedSite.site.public, false);
+    assert.deepEqual(resumedSite.recentSiteIds, [secondSite, firstSite]);
+    assert.deepEqual((await call("site.catalog")).recentSiteIds, [secondSite, firstSite]);
     await assert.rejects(call("browser.state", { browserId: id }));
     assert.deepEqual(await call("cron.running"), []);
     assert.deepEqual(await call("push.ack", { clientId: id, challengeId: id }), { ok: false });

@@ -1,11 +1,12 @@
 import { flushPromises, shallowMount } from "@vue/test-utils";
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import SharedSitesList from "./SharedSitesList.vue";
-import { getSite, setSitePublic } from "@/client/lib/api";
+import { getSite, openSite, setSitePublic } from "@/client/lib/api";
 import type { SiteDescriptor } from "@/shared/types";
 
 vi.mock("@/client/lib/api", () => ({
   getSite: vi.fn(),
+  openSite: vi.fn(),
   setSitePublic: vi.fn(),
 }));
 
@@ -17,7 +18,12 @@ const site: SiteDescriptor = {
   public: false,
 };
 
+function opened(site: SiteDescriptor) {
+  return { site, sites: [site], recentSiteIds: [site.id] };
+}
+
 function mountSites(stored: SiteDescriptor, idPrefix = "") {
+  vi.mocked(openSite).mockResolvedValue(opened(stored));
   return shallowMount(SharedSitesList, {
     props: { sites: [stored], idPrefix },
     global: {

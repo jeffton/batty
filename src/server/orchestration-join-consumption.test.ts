@@ -3,7 +3,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import { fileLibraryRef, siteLibraryRef } from "@/shared/artifact-library";
+import { fileArtifactRef, siteArtifactRef } from "@/shared/artifacts";
 import { Type } from "typebox";
 import { fixture, until, withAttachments } from "./orchestration-test-fixture";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
@@ -48,7 +48,7 @@ test.each(["queued-first", "await-first", "await-first-reopen", "notice-first"])
       url: "/joined-site",
       public: false as const,
     };
-    const artifactRefs = [fileLibraryRef(file.id), siteLibraryRef(site.id)];
+    const artifactRefs = [fileArtifactRef(file.id), siteArtifactRef(site.id)];
     const presentation = { sentFiles: [file], sites: [site] };
     const { faux, orchestration, open, registry } = await fixture(
       10_000,

@@ -18,7 +18,7 @@ import type { WebPushService } from "./web-push.js";
 import { suppressAgentCompletionNotification } from "../shared/agent-notification.js";
 
 import { cleanup, fixture, until, withAttachments } from "./orchestration-test-fixture.js";
-import { siteLibraryRef } from "@/shared/artifact-library";
+import { siteArtifactRef } from "@/shared/artifacts";
 import { DeliveryRecord } from "./orchestration-history.js";
 
 // A cron's final report is a normal main turn.
@@ -192,7 +192,7 @@ test("failed direct cron retains its failure across reopen, not draft attachment
     url: "/failed-run-site",
     public: false as const,
   };
-  const siteRef = siteLibraryRef(site.id);
+  const siteRef = siteArtifactRef(site.id);
   const resolve = vi.fn(async () => ({ sites: [site] }));
   const { faux, orchestration, open, registry } = await fixture(
     10_000,
@@ -488,7 +488,7 @@ test("direct cron replays after committing the visible result without delivering
     url: "/brief",
     public: false as const,
   };
-  const siteRef = siteLibraryRef(site.id);
+  const siteRef = siteArtifactRef(site.id);
   const { faux, orchestration, open } = await fixture(
     10_000,
     console.error,

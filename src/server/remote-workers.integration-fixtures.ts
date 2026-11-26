@@ -370,7 +370,7 @@ function filesIn(value: unknown): SentFileDescriptor[] {
   return Object.values(object).flatMap(filesIn);
 }
 
-function importedRef(request: ModelContext, name: string) {
+function importedRef(request: { messages: Readonly<ModelContext["messages"]> }, name: string) {
   const imports = request.messages.filter(
     (message): message is Extract<typeof message, { role: "toolResult" }> =>
       message.role === "toolResult" && message.toolName === "import_files",

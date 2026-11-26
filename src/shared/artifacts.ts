@@ -1,30 +1,7 @@
-import type { SentFileDescriptor, SiteDescriptor } from "./types";
+import type { SentFileDescriptor } from "./types";
 
-interface ArtifactLibraryFields {
-  ref: string;
-  title: string;
-  createdAt: string;
-  starred: boolean;
-}
-
-export type ArtifactLibraryItem = ArtifactLibraryFields &
-  (
-    | {
-        kind: "file";
-        source: "upload" | "generated";
-        file: SentFileDescriptor;
-        textPreviewUrl?: string;
-      }
-    | { kind: "site"; site: SiteDescriptor }
-  );
-
-export interface ArtifactLibraryResponse {
-  artifacts: ArtifactLibraryItem[];
-  nextCursor?: string;
-}
-
-export const fileLibraryRef = (id: string) => `file:${id}`;
-export const siteLibraryRef = (id: string) => `site:${id}`;
+export const fileArtifactRef = (id: string) => `file:${id}`;
+export const siteArtifactRef = (id: string) => `site:${id}`;
 
 export function isTextArtifactCandidate({
   name,

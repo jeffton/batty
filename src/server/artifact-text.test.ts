@@ -3,7 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import fastify from "fastify";
 import { expect, test } from "vite-plus/test";
-import { hasTextPreview, sendArtifactText } from "./artifact-text";
+import { sendArtifactText } from "./artifact-text";
 import { INLINE_TEXT_MAX_BYTES } from "./text-output-limits";
 
 const metadata = (name: string) => ({ name, mimeType: "application/octet-stream" });
@@ -32,9 +32,7 @@ test("previews only a bounded UTF-8 prefix without a partial multibyte character
   expect(exact.body).toHaveLength(INLINE_TEXT_MAX_BYTES);
 });
 
-test("byte sniffing and the preview reject binary data under a text-looking name", async ({
-  onTestFinished,
-}) => {
+test("the preview rejects binary data under a text-looking name", async ({ onTestFinished }) => {
   const dir = await fs.mkdtemp(path.join(tmpdir(), "batty-text-"));
   onTestFinished(() => fs.rm(dir, { recursive: true, force: true }));
   const file = path.join(dir, "transport.ts");
@@ -50,7 +48,6 @@ test("byte sniffing and the preview reject binary data under a text-looking name
   app.get("/preview", (_request, reply) => sendArtifactText(reply, descriptor, file));
   for (const bytes of [Buffer.from([65, 0, 66]), Buffer.from([0xff, 65, 66])]) {
     await fs.writeFile(file, bytes);
-    expect(await hasTextPreview(descriptor, file)).toBe(false);
     expect((await app.inject("/preview")).statusCode).toBe(415);
   }
 });

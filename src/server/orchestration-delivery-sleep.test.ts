@@ -14,7 +14,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { expect, test, vi } from "vite-plus/test";
 import { createDeliveryTask } from "./orchestration-delivery.js";
 import { ArchivedWorker, DeliveryRecord } from "./orchestration-history.js";
-import { siteLibraryRef } from "@/shared/artifact-library";
+import { siteArtifactRef } from "@/shared/artifacts";
 import { presentationHook } from "./presentation-hook";
 import { withAttachments } from "./orchestration-test-fixture";
 import { OrchestrationDoc, WorkerDoc, type OrchestrationServices } from "./orchestration-state.js";
@@ -40,7 +40,7 @@ test("batty.delivery retry sleeps across reopen and completes its existing assig
     url: "/retry-site",
     public: false as const,
   };
-  const siteRef = siteLibraryRef(site.id);
+  const siteRef = siteArtifactRef(site.id);
   const resolvePresentation = vi.fn<OrchestrationServices["resolvePresentation"]>(
     async (_, { artifactRefs }) => {
       expect(artifactRefs).toEqual([siteRef]);

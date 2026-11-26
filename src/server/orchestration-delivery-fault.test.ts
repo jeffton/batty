@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
 import { fixture, until, withAttachments } from "./orchestration-test-fixture.js";
-import { siteLibraryRef } from "@/shared/artifact-library";
+import { siteArtifactRef } from "@/shared/artifacts";
 import { entryMessages } from "./runtime.js";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state.js";
 import type { createDeliveryTask } from "./orchestration-delivery.js";
@@ -390,7 +390,7 @@ test.each(["running", "artifact"])(
       url: "/partial-fault-site",
       public: false as const,
     };
-    const siteRef = siteLibraryRef(site.id);
+    const siteRef = siteArtifactRef(site.id);
     const presentation = { sites: [site] };
     const { faux, orchestration, open } = await fixture(
       1000,

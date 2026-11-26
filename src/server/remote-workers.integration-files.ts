@@ -1,7 +1,6 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { ArtifactLibrary } from "./artifact-library";
 import type { NodePresentation } from "../shared/node-api";
 import { join } from "node:path";
 import { expect, vi } from "vite-plus/test";
@@ -401,8 +400,7 @@ export function registerRemoteWorkerFilesTests() {
           ).wait(context);
         };
         await parent("seed-parent-ref");
-        const files = await new ArtifactLibrary(local.config).list();
-        const ref = files.find((file) => file.title === "evidence.txt")!.ref;
+        const ref = importedRef(await local.runtime.main.context(context), "evidence.txt");
         const send = async (action: string, phase: string, useRef = false) => {
           next = {
             action,

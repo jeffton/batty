@@ -33,7 +33,7 @@ import type { Runtime } from "./runtime";
 import type { WorkerCommand, WorkerCommandContext } from "./orchestration-workers";
 import { stateDirPath } from "./options";
 import { encodeRuntimeNotice } from "./runtime-notices";
-import { ArtifactLibrary } from "./artifact-library";
+import { ArtifactResolver } from "./artifact-resolver";
 import { describePresentation } from "./message-presentation";
 import { nodeSessionEvent } from "./remote-presentation";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
@@ -577,7 +577,7 @@ export class RemoteWorkers {
           args.files,
           api,
           _ctx,
-          (ref) => new ArtifactLibrary(this.runtime.config).resolveFileSource(ref),
+          (ref) => new ArtifactResolver(this.runtime.config).resolveFileSource(ref),
         )
       : [];
     const {

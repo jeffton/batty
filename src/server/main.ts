@@ -20,8 +20,6 @@ import { createBrowserErrorReporter } from "./browser-errors";
 import { registerCronRoutes } from "./routes/cron";
 import { registerDraftRoutes } from "./routes/drafts";
 import { registerSiteRoutes } from "./routes/sites";
-import { registerArtifactRoutes } from "./routes/artifacts";
-import { ArtifactLibrary } from "./artifact-library";
 import { sendArtifactText } from "./artifact-text";
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
 import { cloudBrowserAvailable, registerCloudBrowserLauncher } from "./cloud-browser-launcher";
@@ -103,7 +101,6 @@ registerCronRoutes(app, runtime.orchestration);
 const draftScope = draftOwnerScope(config.authSecret);
 await registerDraftRoutes(app, stateDirPath(config.battyDir), draftScope);
 registerSiteRoutes(routeContext);
-registerArtifactRoutes(app, new ArtifactLibrary(config));
 const closeCloudBrowsers = await registerCloudBrowserRoutes(
   app,
   runtime.tools.browserService,

@@ -33,7 +33,7 @@ import { stateDirPath } from "./options";
 import { enableCodemodeAdapters } from "./codemode-native";
 import { listWorkspaces, workspaceForCwd } from "./workspaces";
 import { normalizeMessage, normalizeBlocks } from "./pi-state";
-import { ArtifactLibrary } from "./artifact-library";
+import { ArtifactResolver } from "./artifact-resolver";
 import { resolvePresentation } from "./message-presentation";
 import {
   assertArtifactPresentationReady,
@@ -148,16 +148,16 @@ export class Runtime {
     });
     const registry = createRegistry();
     const tools = await createTools(config);
-    const artifactLibrary = new ArtifactLibrary(config);
+    const artifactResolver = new ArtifactResolver(config);
     const orchestration = createOrchestration(config, networkAvailable, {
       resolvePresentation: (conversationId, selection) =>
-        resolvePresentation(artifactLibrary, selection, async (id) => {
+        resolvePresentation(artifactResolver, selection, async (id) => {
           const conversation = (await harness.conversation(conversationId, context))!;
           const cwd = (await conversation.agent(context)).cwd!;
           const workspace = await workspaceForCwd(config, cwd);
           return tools.browserService.messageBrowser(workspace.id, id);
         }),
-      resolveFileSource: (ref) => artifactLibrary.resolveFileSource(ref),
+      resolveFileSource: (ref) => artifactResolver.resolveFileSource(ref),
     });
     const memory = createMemory(
       {

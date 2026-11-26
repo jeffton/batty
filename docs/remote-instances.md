@@ -52,7 +52,7 @@ Commands carry durable request IDs. Transport reconnection never replays command
 
 ### Files sent to workers
 
-`subagent` accepts `files: [{ path: "drawing.png" }, { ref: "file:…" }]` on `run`, `queue`, `resume` and `steer`, locally and remotely. Paths resolve against the caller's working directory. File refs resolve in the caller's local artifact library. A prompt is still required.
+`subagent` accepts `files: [{ path: "drawing.png" }, { ref: "file:…" }]` on `run`, `queue`, `resume` and `steer`, locally and remotely. Paths resolve against the caller's working directory. File refs resolve in the caller's local artifact storage. A prompt is still required.
 
 Each tool call freezes the selected bytes in attachment storage before submission. Queued inputs and retries use those snapshots, not mutable workspace originals. The worker receives its own local paths and native image blocks. Model-visible images use the same conversion and resizing as `read`, while attachments retain their original bytes. Images that cannot be prepared are rejected before assignment admission. Inputs appear as attachments in its transcript; remote mirrors import those attachments through the existing authenticated sent-file endpoint. Input files are retained with attachment history, not deleted when the assignment finishes.
 

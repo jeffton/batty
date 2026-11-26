@@ -4,7 +4,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
-import { fileLibraryRef, siteLibraryRef } from "@/shared/artifact-library";
+import { fileArtifactRef, siteArtifactRef } from "@/shared/artifacts";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { entryMessages } from "./runtime";
 import { fixture, until, withAttachments } from "./orchestration-test-fixture";
@@ -35,8 +35,8 @@ const browser = {
   public: false as const,
 };
 const artifacts = { sentFiles: [file], sites: [site, browser] };
-const fileRef = fileLibraryRef(file.id);
-const siteRef = siteLibraryRef(site.id);
+const fileRef = fileArtifactRef(file.id);
+const siteRef = siteArtifactRef(site.id);
 const browserId = browser.browserId;
 
 test.each([false, true])(

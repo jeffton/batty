@@ -3,6 +3,7 @@ import { Check, Copy } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "./FullPopover.vue";
 import { withBaseUrl } from "@/client/lib/base-url";
+import { openSite } from "@/client/lib/api";
 import { createSiteMessageHandler } from "@/client/lib/site-functions";
 import {
   confirmedSitePublic,
@@ -11,60 +12,101 @@ import {
   savingSiteVisibility,
 } from "@/client/lib/site-visibility";
 import type { SiteDescriptor } from "@/shared/types";
+import type { OwnerOutputs } from "@/shared/owner-api";
 
-const props = defineProps<{ popoverId: string; site: SiteDescriptor }>();
+const props = withDefaults(
+  defineProps<{
+    popoverId: string;
+    site?: SiteDescriptor;
+    label?: string;
+    showSite?: boolean;
+    panelId?: string;
+    panelLabelledBy?: string;
+  }>(),
+  { showSite: true },
+);
+const emit = defineEmits<{
+  toggle: [event: Event];
+  opened: [catalog: OwnerOutputs["site.open"]];
+}>();
 const frame = ref<HTMLIFrameElement>();
 const open = ref(false);
 const revision = ref(0);
 const copied = ref(false);
 const visibilityReady = ref(false);
 const visibilityError = ref("");
-const isPublic = computed(() => confirmedSitePublic(props.site.id) ?? false);
-const saving = computed(() => savingSiteVisibility.has(props.site.id));
+const openError = ref("");
+const siteId = computed(() => props.site?.id);
+const isPublic = computed(() =>
+  siteId.value ? (confirmedSitePublic(siteId.value) ?? false) : false,
+);
+const saving = computed(() => !!siteId.value && savingSiteVisibility.has(siteId.value));
+const showHeader = computed(() => props.showSite && !!props.site);
 let copiedTimeout: number | undefined;
 
-const url = computed(() => withBaseUrl(`/sites/${encodeURIComponent(props.site.id)}/`));
-const absoluteUrl = computed(() => new URL(url.value, window.location.href).href);
+const url = computed(() =>
+  siteId.value ? withBaseUrl(`/sites/${encodeURIComponent(siteId.value)}/`) : undefined,
+);
+const absoluteUrl = computed(() =>
+  url.value ? new URL(url.value, window.location.href).href : undefined,
+);
 const siteMessage = createSiteMessageHandler(() => (frame.value ? [frame.value] : []));
 
 function handleToggle(event: Event): void {
   open.value = (event as ToggleEvent).newState === "open";
   if (open.value) revision.value++;
+  emit("toggle", event);
 }
 
-watch([open, () => props.site.id], async ([isOpen, siteId], _previous, onCleanup) => {
+watch([open, siteId], ([isOpen, id], _previous, onCleanup) => {
   visibilityReady.value = false;
   visibilityError.value = "";
-  if (!isOpen) return;
+  openError.value = "";
+  if (!isOpen || !id) return;
   const controller = new AbortController();
   onCleanup(() => controller.abort());
-  try {
-    await loadSiteVisibility(siteId, controller.signal);
-    if (!controller.signal.aborted) visibilityReady.value = true;
-  } catch (error) {
-    if (!controller.signal.aborted) {
-      visibilityError.value = `Could not load site visibility: ${error instanceof Error ? error.message : String(error)}`;
-    }
-  }
+  void refreshVisibility(id, controller.signal);
+  void recordOpen(id, controller.signal);
 });
+
+async function refreshVisibility(id: string, signal: AbortSignal): Promise<void> {
+  try {
+    await loadSiteVisibility(id, signal);
+    if (!signal.aborted) visibilityReady.value = true;
+  } catch (error) {
+    if (!signal.aborted)
+      visibilityError.value = `Could not load site visibility: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+async function recordOpen(id: string, signal: AbortSignal): Promise<void> {
+  try {
+    const result = await openSite(id);
+    if (!signal.aborted) emit("opened", result);
+  } catch (error) {
+    if (!signal.aborted)
+      openError.value = `Could not save recent site: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
 
 async function togglePublic(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement;
   const requestedPublic = input.checked;
   input.checked = isPublic.value;
   const preview = revision.value;
+  const id = props.site!.id;
   visibilityError.value = "";
   try {
-    await saveSiteVisibility(props.site.id, requestedPublic);
+    await saveSiteVisibility(id, requestedPublic);
   } catch (error) {
-    if (open.value && revision.value === preview) {
+    if (open.value && revision.value === preview && siteId.value === id) {
       visibilityError.value = `Could not change site visibility: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 }
 
 async function copyUrl(): Promise<void> {
-  await navigator.clipboard.writeText(absoluteUrl.value);
+  await navigator.clipboard.writeText(absoluteUrl.value!);
   copied.value = true;
   window.clearTimeout(copiedTimeout);
   copiedTimeout = window.setTimeout(() => (copied.value = false), 1400);
@@ -81,14 +123,17 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
 <template>
   <FullPopover
     :popover-id="props.popoverId"
-    :title="props.site.name"
-    :subtitle="absoluteUrl"
-    close-label="Close site"
+    :title="showHeader ? props.site!.name : 'Sites'"
+    :subtitle="showHeader ? absoluteUrl : undefined"
+    :close-label="props.label ? 'Close sites' : 'Close site'"
     role="dialog"
-    :aria-label="props.site.name"
+    :aria-label="props.label ?? props.site?.name"
     @toggle="handleToggle"
   >
-    <template #header-actions>
+    <template v-if="$slots.tabs" #header-content>
+      <slot name="tabs" />
+    </template>
+    <template v-if="showHeader" #header-actions>
       <label
         class="site-popover__switch"
         :aria-busy="(!visibilityReady && !visibilityError) || saving"
@@ -115,16 +160,31 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
         <Copy v-else :size="16" />
       </button>
     </template>
-    <div v-if="open" class="site-popover__content">
-      <p v-if="visibilityError" role="alert" class="site-popover__error">{{ visibilityError }}</p>
-      <iframe
-        ref="frame"
-        class="site-popover__frame"
-        :data-site-id="props.site.id"
-        :src="`${url}?batty_preview=${revision}`"
-        :title="props.site.name"
-        sandbox="allow-downloads allow-forms allow-modals allow-popups allow-scripts"
-      ></iframe>
+    <div
+      v-if="open"
+      class="site-popover__panel"
+      :id="props.panelId"
+      :role="props.panelLabelledBy ? 'tabpanel' : undefined"
+      :aria-labelledby="props.panelLabelledBy"
+    >
+      <div v-if="props.site" v-show="props.showSite" class="site-popover__content">
+        <div v-if="openError || visibilityError" class="site-popover__errors">
+          <p v-if="openError" role="alert" class="site-popover__error">{{ openError }}</p>
+          <p v-if="visibilityError" role="alert" class="site-popover__error">
+            {{ visibilityError }}
+          </p>
+        </div>
+        <iframe
+          :key="props.site.id"
+          ref="frame"
+          class="site-popover__frame"
+          :data-site-id="props.site.id"
+          :src="`${url}?batty_preview=${revision}`"
+          :title="props.site.name"
+          sandbox="allow-downloads allow-forms allow-modals allow-popups allow-scripts"
+        ></iframe>
+      </div>
+      <slot v-if="!props.site || !props.showSite" />
     </div>
   </FullPopover>
 </template>
@@ -137,6 +197,11 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
   height: 100%;
   border: 0;
   background: white;
+}
+
+.site-popover__panel {
+  height: 100%;
+  min-height: 0;
 }
 
 .site-popover__content {

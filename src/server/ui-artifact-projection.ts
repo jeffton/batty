@@ -1,26 +1,16 @@
 import type { UiMessage } from "@/shared/types";
 
-/** Mutation snapshots and forwarding bookkeeping belong to durable agent history,
- * not the UI. Keep every other metadata field, including immutable diff patches.
- * Only descend through known tool/notice metadata containers, never tool arguments
- * or unrelated application data that happens to use the same field names.
- */
 export function projectUiMetadata<T extends object>(metadata: T): T {
   const {
     battyFileChanges: _snapshots,
-    forwardedArtifacts: _forwarded,
+    runtimeResultArtifacts: _archived,
+    forwardedArtifacts: _oldForwarding,
     ...visible
   } = metadata as Record<string, unknown>;
-  for (const key of ["details", "runtimeResultArtifacts"] as const) {
+  for (const key of ["details", "runtimePresentation", "presentation"] as const) {
     const value = visible[key];
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const artifacts = value as Record<string, unknown>;
-      visible[key] = projectUiMetadata(
-        key === "runtimeResultArtifacts" && artifacts.reportAttachments
-          ? (artifacts.reportAttachments as Record<string, unknown>)
-          : artifacts,
-      );
-    }
+    if (value && typeof value === "object" && !Array.isArray(value))
+      visible[key] = projectUiMetadata(value as Record<string, unknown>);
   }
   if (Array.isArray(visible.calls)) {
     visible.calls = visible.calls.map((call) =>

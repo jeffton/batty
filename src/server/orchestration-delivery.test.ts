@@ -7,6 +7,7 @@ import { defineExtension, defineTool, InboxDoc } from "@earendil-works/pi-durabl
 import { Type } from "typebox";
 
 import { OrchestrationDoc } from "./orchestration.js";
+import type { createDeliveryTask } from "./orchestration-delivery";
 
 import { decodeRuntimeNotice } from "./runtime-notices.js";
 import { projectEntry } from "./memory-projection.js";
@@ -16,7 +17,8 @@ import type { WebPushService } from "./web-push.js";
 
 import { suppressAgentCompletionNotification } from "../shared/agent-notification.js";
 
-import { cleanup, fixture, until } from "./orchestration-test-fixture.js";
+import { cleanup, fixture, until, withAttachments } from "./orchestration-test-fixture.js";
+import { siteLibraryRef } from "@/shared/artifact-library";
 import { DeliveryRecord } from "./orchestration-history.js";
 
 // A cron's final report is a normal main turn.
@@ -182,30 +184,49 @@ test.each([
   },
 );
 
-test("failed cron retains artifacts and failure details across reopen without direct delivery", async () => {
-  const { faux, orchestration, open, registry } = await fixture();
-  const artifacts = {
-    sites: [{ id: "failed-run-site", name: "Partial result", url: "https://example.com/partial" }],
+test("failed direct cron retains its failure across reopen, not draft attachments", async () => {
+  const site = {
+    kind: "site" as const,
+    id: "failed-run-site",
+    name: "Partial result",
+    url: "/failed-run-site",
+    public: false as const,
   };
+  const siteRef = siteLibraryRef(site.id);
+  const resolve = vi.fn(async () => ({ sites: [site] }));
+  const { faux, orchestration, open, registry } = await fixture(
+    10_000,
+    console.error,
+    undefined,
+    undefined,
+    resolve,
+  );
   registry.install(
     defineExtension({
-      name: "failed-run-artifacts",
+      name: "failed-cron-follow-up",
       tools: [
         defineTool({
-          name: "partial_result",
-          description: "Attach partial results before a provider failure",
+          name: "continue_draft",
+          description: "Continue the draft",
           parameters: Type.Object({}),
-          execute: async () => ({ output: [fauxText("attached")], details: artifacts }),
+          execute: async () => ({ output: [fauxText("continued")] }),
         }),
       ],
     }),
   );
   let { harness, main } = await open();
   faux.setResponses([
-    fauxAssistantMessage([fauxToolCall("partial_result", {})], { stopReason: "toolUse" }),
-    () => {
-      throw new Error("provider rejected continuation");
-    },
+    fauxAssistantMessage(
+      [
+        fauxText(withAttachments("draft before continuation", { artifactRefs: [siteRef] })),
+        fauxToolCall("continue_draft", {}),
+      ],
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage(
+      [fauxText(withAttachments("failed continuation", { artifactRefs: ["site:never-resolved"] }))],
+      { stopReason: "error", errorMessage: "provider rejected continuation" },
+    ),
     fauxAssistantMessage([fauxText("failure received")]),
   ]);
   const job = await orchestration.addJob({
@@ -223,13 +244,17 @@ test("failed cron retains artifacts and failure details across reopen without di
   const run = (await orchestration.listRunLogs(job.id))[0]!;
   expect(run.status).toBe("failed");
   const receipt = await harness.snapshot(DeliveryRecord, String(run.taskId), context);
-  expect(receipt?.artifacts).toMatchObject(artifacts);
+  expect(resolve).toHaveBeenCalledExactlyOnceWith(Number(run.sessionId), {
+    artifactRefs: [siteRef],
+  });
+  expect(receipt?.presentation).toBeUndefined();
   expect(receipt?.directDelivered).toBeUndefined();
   const failure = (await main.context(context)).messages
     .flatMap((message) => (message.role === "user" ? [decodeRuntimeNotice(message.content)] : []))
     .find((notice) => notice?.kind === "cron")!;
   expect(failure.text).toContain("provider rejected continuation");
-  expect(failure.data?.runtimeResultArtifacts).toMatchObject(artifacts);
+  expect(failure.data?.runtimePresentation).toBeUndefined();
+  expect(failure.data?.directDelivery).toBeUndefined();
   await harness.close(context);
   ({ harness, main } = await open());
   expect((await harness.getTask(run.taskId, context))?.state.outcome).toMatchObject({
@@ -238,8 +263,12 @@ test("failed cron retains artifacts and failure details across reopen without di
     error: { message: run.output },
   });
   expect(
-    (await harness.snapshot(DeliveryRecord, String(run.taskId), context))?.artifacts,
-  ).toMatchObject(artifacts);
+    (await harness.snapshot(DeliveryRecord, String(run.taskId), context))?.presentation,
+  ).toBeUndefined();
+  expect(entryMessages((await main.context(context)).entries)).toMatchObject([
+    { role: "custom" },
+    { role: "assistant", blocks: [fauxText("failure received")] },
+  ]);
 });
 
 test("silent cron creates no report or steering while main is busy", async () => {
@@ -451,34 +480,93 @@ test.each(
   if (busy) expect(replies.at(-2)).toMatchObject({ content: [fauxText("main finished first")] });
 });
 
-test("direct cron displays unchanged output without a main generation", async () => {
-  const { faux, orchestration, open } = await fixture();
-  const { main } = await open();
+test("direct cron replays after committing the visible result without delivering it again", async () => {
+  const site = {
+    kind: "site" as const,
+    id: "brief-site",
+    name: "Brief",
+    url: "/brief",
+    public: false as const,
+  };
+  const siteRef = siteLibraryRef(site.id);
+  const { faux, orchestration, open } = await fixture(
+    10_000,
+    console.error,
+    undefined,
+    undefined,
+    async () => ({ sites: [site] }),
+  );
+  let { harness, main } = await open();
+  const answer = vi.fn(() =>
+    fauxAssistantMessage([
+      fauxText(withAttachments("full briefing\nunchanged", { artifactRefs: [siteRef] })),
+    ]),
+  );
   faux.setResponses([
     (request) => {
       const prompt = JSON.stringify(request.messages);
       expect(prompt).toContain("You run in a separate execution scope");
       expect(prompt).not.toContain("You run inline in the permanent main conversation");
-      return fauxAssistantMessage([fauxText("full briefing\nunchanged")]);
+      return answer();
     },
   ]);
-  const job = await orchestration.addJob({
-    title: "Scheduled test task",
-    prompt: "brief",
-    delivery: "direct",
-    schedule: { kind: "at", in: "1h" },
-  });
-  await main.commit(async (tx) => {
-    (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
-  }, context);
-  await orchestration.tick();
-  await until(async () => (await orchestration.listRunLogs(job.id))[0]?.status === "completed");
-  await main.waitForIdle(context);
-  expect(entryMessages((await main.context(context)).entries)).toMatchObject([
-    { role: "assistant", blocks: [fauxText("full briefing\nunchanged")] },
-  ]);
-  expect((await orchestration.listRunLogs(job.id))[0]!.sessionId).not.toBe(String(main.id));
-});
+  const delivery = orchestration.extension.tasks!.find(
+    (task) => task.definition.name === "batty.delivery",
+  ) as ReturnType<typeof createDeliveryTask>;
+  let interrupted = false;
+  const report = delivery.definition.phases.report;
+  const interrupt = vi
+    .spyOn(delivery.definition.phases, "report")
+    .mockImplementationOnce((task, runtime, ctx) =>
+      report(
+        task,
+        {
+          ...runtime,
+          commit: async (...args) => {
+            await runtime.commit(...args);
+            return await new Promise<never>((_, reject) => {
+              ctx.abortSignal!.addEventListener("abort", () => reject(ctx.abortSignal!.reason), {
+                once: true,
+              });
+              interrupted = true;
+            });
+          },
+        },
+        ctx,
+      ),
+    );
+  try {
+    const job = await orchestration.addJob({
+      title: "Scheduled test task",
+      prompt: "brief",
+      delivery: "direct",
+      schedule: { kind: "at", in: "1h" },
+    });
+    await main.commit(async (tx) => {
+      (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
+    }, context);
+    await orchestration.tick();
+    await until(async () => interrupted);
+    const running = (await orchestration.listRunningCron())[0]!;
+    expect(await harness.snapshot(DeliveryRecord, String(running.taskId), context)).toMatchObject({
+      directDelivered: true,
+    });
+    const visible = entryMessages((await main.context(context)).entries);
+    expect(visible).toMatchObject([
+      { role: "assistant", blocks: [fauxText("full briefing\nunchanged")], sites: [site] },
+    ]);
+    await harness.close(context);
+    ({ harness, main } = await open());
+    harness.resume();
+    await until(async () => (await orchestration.listRunLogs(job.id))[0]?.status === "completed");
+    await main.waitForIdle(context);
+    expect(entryMessages((await main.context(context)).entries)).toEqual(visible);
+    expect(answer).toHaveBeenCalledOnce();
+    expect((await orchestration.listRunLogs(job.id))[0]!.sessionId).not.toBe(String(main.id));
+  } finally {
+    interrupt.mockRestore();
+  }
+}, 15_000);
 
 test.each(["NO_REPLY", "error"])("direct cron handles %s", async (output) => {
   const { faux, orchestration, open } = await fixture();

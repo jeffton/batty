@@ -12,12 +12,13 @@ import type { ToolExecutionDetails, WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { workspaceBrowserKey, type BrowserService } from "./browser-service";
 import { storeSentFiles } from "./send-files";
-import { ATTACHMENT_DELIVERY_INSTRUCTION, reportWithAttachments } from "./attachment-contract";
-import { createSite, deleteSite, getSite } from "./sites";
+import { describePresentation } from "./message-presentation";
+import { siteLibraryRef } from "@/shared/artifact-library";
+import { createSite, deleteSite } from "./sites";
 import { registerSiteFunction, deleteSiteFunction } from "./site-functions";
 import { runWebSearch } from "./web-search";
 import {
-  AttachFilesToolSchema,
+  ImportFilesToolSchema,
   BrowserToolSchema,
   SitesToolSchema,
   WebSearchToolSchema,
@@ -157,8 +158,8 @@ export function createBrowserTool({
     promptGuidelines: [
       "Use this tool when a page requires JavaScript or multi-step interaction that web_search content cannot handle.",
       "The browser, profile, logins and tabs are shared with main and other subagents in this workspace. Use action=pages to see existing tabs and coordinate by pageId; use action=open to navigate or create a page.",
-      "Set cloud=true on action=open to enable shared VPS browsing and attach its live-browser button. Use action=attach to attach that same browser again in a private popover. The user and agent share tabs, login and page state; this does not transfer the session to local Safari.",
-      "Closing the popover only disconnects the viewer. action=close ends the browser and invalidates its attachments; browsers stop after one hour without browser activity. Close and inactivity retain the workspace profile, cookies and logins for the next browser; neither logs out. Forward a received browser artifact with attach_artifacts and its browser: ref; this preserves the same live session and login, not a snapshot or a new browser. Forwarding does not reset expiry or bypass Batty authentication.",
+      "Set cloud=true on open for a shared live session. action=attach returns its current browserId. The user and agent share tabs, login and page state.",
+      "Closing the popover only disconnects the viewer. action=close ends the browser and invalidates its button; browsers stop after one hour without activity. Neither logs out.",
       "Set useTailscale=true on the initial open to route that browser session through the configured SSH destination. Close the session before changing its routing.",
       "Tabs and logins are shared, but each agent session and the user viewer have independent selected tabs. Use action=pages to list tabs, action=switch with pageId to select yours, and newPage=true on open to create one. To share a tab with another agent, exchange its ID from pages. To inspect the user's current tab, call pages and use the entry marked (viewer), with viewerActive=true; this does not change your selection. Pass pageId on an action to target it once, or switch with pageId to select it for later actions; open also selects its target. Other clients keep their selection, but the shared tab's navigation and changes are visible to everyone on it. IDs belong to this workspace's live browser, not an access grant. A new agent's first open creates its own tab; attach does not select a tab. Closing another client's selected tab makes its next action fail until it explicitly selects or opens a tab.",
       "Reuse the active page for sequential research; use newPage=true only when comparing pages. Close rejected or finished research tabs immediately with action=close-page, and use action=pages periodically to keep the tab count low.",
@@ -209,12 +210,20 @@ export function createBrowserTool({
             paths: result.downloadPaths,
           })
         : [];
+      const { sites, ...details } = output.details;
+      const browser = sites?.find((site) => site.kind === "browser");
       return {
         content: [
-          { type: "text" as const, text: output.text },
+          {
+            type: "text" as const,
+            text: describePresentation(
+              browser ? `${output.text}\nBrowser ID: ${browser.browserId}` : output.text,
+              { sentFiles },
+            ),
+          },
           ...(result.image ? [{ type: "image" as const, ...result.image }] : []),
         ],
-        details: { ...output.details, ...(sentFiles.length > 0 ? { sentFiles } : {}) },
+        details,
       };
     },
   };
@@ -272,13 +281,10 @@ export function createSitesTool({
     name: "sites",
     label: "Sites",
     description:
-      "Create, share, and delete hosted HTML sites. Create allocates a directory; use file tools to build or change its contents. Share attaches the site to the current response as a native site attachment that opens the site popover; ordinary links do not.",
-    promptSnippet:
-      "Create and deliver interactive HTML sites as native site attachments, not Markdown links.",
+      "Create, delete, and configure hosted HTML sites. Create returns a directory and a site ref.",
+    promptSnippet: "Create interactive HTML sites.",
     promptGuidelines: [
       "Call create to allocate a site directory, then use write/edit tools to create index.html and its assets there.",
-      "After building and checking the site, call share to attach it to your response. Do not replace the native site attachment with a plain URL or Markdown link; those do not open the site popover.",
-      "To deliver a site from a subagent or other report, call attach_artifacts with its listed site ref in your own turn. Do not recreate or reshare it, or copy its URL as a substitute for attaching it.",
       "Use the browser URL from the result with the browser tool to inspect the site without changing its public setting.",
       "Use delete to permanently remove a site.",
       "Register backend code with action=function, siteId, functionName and code. Connections are host-admin grants, not function parameters. Code runs in QuickJS with only tools.input() and tools.request({connection, method, body}); return JSON. See docs/sites.md for examples and limits.",
@@ -295,7 +301,7 @@ export function createSitesTool({
           content: [
             {
               type: "text",
-              text: `Created site ${site.descriptor.id}.\nDirectory: ${site.directory}\nUser URL: ${site.descriptor.url}\nBrowser URL: ${site.browserUrl}`,
+              text: `Created site ${site.descriptor.id}.\nArtifact ref: ${siteLibraryRef(site.descriptor.id)}\nDirectory: ${site.directory}\nUser URL: ${site.descriptor.url}\nBrowser URL: ${site.browserUrl}`,
             },
           ],
           details: {},
@@ -322,44 +328,25 @@ export function createSitesTool({
           details: {},
         };
       }
-      if (params.action === "delete") {
-        await deleteSite(config.sitesDir, siteId);
-        return {
-          content: [{ type: "text", text: `Deleted site ${siteId}.` }],
-          details: {},
-        };
-      }
-
-      const site = await getSite(config.sitesDir, config.baseUrl, siteId);
+      await deleteSite(config.sitesDir, siteId);
       return {
-        content: [
-          {
-            type: "text",
-            text: `Shared site ${site.descriptor.id}. Attached to this response as a native site attachment; do not replace it with a URL or Markdown link.\nDirectory: ${site.directory}\nUser URL: ${site.descriptor.url}\nBrowser URL: ${site.browserUrl}`,
-          },
-        ],
-        details: { sites: [site.descriptor] },
+        content: [{ type: "text", text: `Deleted site ${siteId}.` }],
+        details: {},
       };
     },
   };
 }
 
-export function createAttachFilesTool({
+export function createImportFilesTool({
   workspace,
   config,
-}: CommonToolDependencies): ToolDefinition<typeof AttachFilesToolSchema> {
+}: CommonToolDependencies): ToolDefinition<typeof ImportFilesToolSchema> {
   return {
-    name: "attach_files",
-    label: "Attach Files",
-    description: `Copy files into Batty storage so they appear as attachments in the current agent’s response and downloads during the tool call. ${ATTACHMENT_DELIVERY_INSTRUCTION}`,
-    promptSnippet: "Attach files to the final response without leaving Batty.",
-    promptGuidelines: [
-      "Use this tool when the user asks you to send or attach one or more files.",
-      ATTACHMENT_DELIVERY_INSTRUCTION,
-      "Pass every file path you want to attach in paths.",
-      "Only attach files that already exist in the workspace or as absolute paths you have access to.",
-    ],
-    parameters: AttachFilesToolSchema,
+    name: "import_files",
+    label: "Import Files",
+    description: "Import immutable local file snapshots and return file refs.",
+    promptSnippet: "Import immutable file artifacts.",
+    parameters: ImportFilesToolSchema,
     execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
       const sessionFile = ctx.sessionManager.getSessionFile();
       const sessionId =
@@ -382,13 +369,10 @@ export function createAttachFilesTool({
         content: [
           {
             type: "text",
-            text: reportWithAttachments(
-              `Attached ${count} ${noun} in this execution scope.`,
-              sentFiles,
-            ),
+            text: describePresentation(`Imported ${count} ${noun}.`, { sentFiles }),
           },
         ],
-        details: { sentFiles },
+        details: {},
       };
     },
   };

@@ -14,7 +14,6 @@ import {
   type TaskRuntime,
   type ConversationId,
   type TaskId,
-  type EntryId,
   type SubmissionId,
   type SettledSubmissionRecord,
 } from "@earendil-works/pi-durable";
@@ -28,10 +27,11 @@ import {
   type RuntimeNotice,
 } from "./runtime-notices.js";
 
-import { runtimeResultArtifacts, subagentReportArtifacts } from "./runtime-result-artifacts.js";
-import { reportWithAttachments } from "./attachment-contract.js";
-import { reportWithArtifacts } from "./artifact-forwarding.js";
-import type { AgentTurnArtifacts } from "./agent-turn-file-changes.js";
+import {
+  describePresentation,
+  type MessagePresentation,
+  type PresentedAssistant,
+} from "./message-presentation.js";
 
 import { ArchivedRun, DeliveryRecord } from "./orchestration-history";
 
@@ -72,32 +72,10 @@ type DeliveryState =
       text: string;
       send: boolean;
       failed: boolean;
-      artifacts?: AgentTurnArtifacts;
+      presentation?: MessagePresentation;
     };
 
 export function createDeliveryTask(services: OrchestrationServices) {
-  const collectArtifacts = async (
-    childId: ConversationId,
-    minEntryId: EntryId | undefined,
-    maxEntryId: EntryId | undefined,
-    subagent: boolean,
-    ctx: Context,
-  ) => {
-    const child = (await services.harness.conversation(childId, ctx))!;
-    const entries = [];
-    let cursor;
-    do {
-      const page = await child.entries(
-        { minEntryId, ...(maxEntryId === undefined ? {} : { maxEntryId }) },
-        200,
-        cursor,
-        ctx,
-      );
-      entries.unshift(...[...page.items].reverse());
-      cursor = page.next;
-    } while (cursor);
-    return subagent ? subagentReportArtifacts(entries) : runtimeResultArtifacts(entries);
-  };
   const retireAssignment = async (
     childId: ConversationId,
     owner: TaskId<string>,
@@ -161,20 +139,6 @@ export function createDeliveryTask(services: OrchestrationServices) {
         ctx.abortSignal?.throwIfAborted();
         try {
           await retireAssignment(task.input.childId, task.id, runtime, ctx);
-          const original = await services.harness.commit(
-            (tx) => tx.submissionByRequest(task.input.childId, `batty-deliver:${task.id}`),
-            ctx,
-          );
-          const artifacts =
-            original?.entry === undefined
-              ? undefined
-              : await collectArtifacts(
-                  task.input.childId,
-                  original.entry,
-                  undefined,
-                  !task.input.runId,
-                  ctx,
-                );
           await runtime.commit(
             () => ({
               status: "running",
@@ -183,7 +147,6 @@ export function createDeliveryTask(services: OrchestrationServices) {
                 text: `Task ${task.input.workerId} failed during delivery: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
                 send: task.input.report,
                 failed: true,
-                ...(artifacts ? { artifacts } : {}),
               },
             }),
             ctx,
@@ -307,15 +270,6 @@ export function createDeliveryTask(services: OrchestrationServices) {
           // bookkeeping insertion order, identifies the final answer.
           if (submissionEnd(candidate) >= submissionEnd(settled)) settled = candidate;
         }
-        let artifacts: AgentTurnArtifacts | undefined;
-        if (settled.type === "input")
-          artifacts = await collectArtifacts(
-            task.input.childId,
-            original.entry,
-            settled.status === "done" ? settled.answer : undefined,
-            !task.input.runId,
-            ctx,
-          );
         await runtime.commit(async (tx) => {
           const metadata = await tx.doc(WorkerDoc, task.input.childId);
           const live = await tx.doc(LiveDoc, task.input.childId);
@@ -333,11 +287,13 @@ export function createDeliveryTask(services: OrchestrationServices) {
           const state = await tx.doc(OrchestrationDoc);
           const worker = state.workers[task.input.workerId];
           let text: string;
+          let presentation: MessagePresentation | undefined;
           let send = task.input.report;
           const failed = settled.status === "unanswered";
           if (settled.status === "done" && settled.type === "input") {
             const entry = await tx.entry(AssistantEntry, settled.answer);
-            const message = entry?.model?.[0];
+            const message = entry?.model?.[0] as PresentedAssistant | undefined;
+            presentation = message?.battyPresentation;
             text =
               message?.role === "assistant"
                 ? message.content.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("")
@@ -358,13 +314,13 @@ export function createDeliveryTask(services: OrchestrationServices) {
               text: text || "(no output)",
               send,
               failed,
-              ...(artifacts ? { artifacts } : {}),
+              ...(presentation ? { presentation } : {}),
             },
           };
         }, ctx);
       }),
       report: async (task, runtime, ctx) => {
-        const { text, send, failed, artifacts } = task.state.checkpoint;
+        const { text, send, failed, presentation } = task.state.checkpoint;
         const state = await runtime.snapshot(OrchestrationDoc, ctx);
         // Suppress only successful cron reports, before creating any main input or notice.
         // Keep the task result and run history intact, including for already-checkpointed reports.
@@ -389,10 +345,10 @@ export function createDeliveryTask(services: OrchestrationServices) {
                       : "delivery=assistant — internal result, not delivered to the user. The main assistant is responsible for delivering the requested output.",
                   ]
                 : []),
-              reportWithArtifacts(reportWithAttachments(text, artifacts?.sentFiles), artifacts),
+              describePresentation(text, presentation),
             ].join("\n"),
             data: {
-              ...(artifacts ? { runtimeResultArtifacts: artifacts } : {}),
+              ...(presentation ? { runtimePresentation: presentation } : {}),
               runtimeNotice: {
                 text: `${task.input.runId ? "Cron" : "Subagent"} ${task.input.workerId} result`,
                 markdown: text,
@@ -460,12 +416,12 @@ export function createDeliveryTask(services: OrchestrationServices) {
                       text: [
                         `[cron ${task.input.workerId} completed output]`,
                         "delivery=direct — already delivered to the user; do not redeliver. The output and attachments are retained as context.",
-                        reportWithArtifacts(text, artifacts),
-                        "This output and its attachments are already visible to the user. Artifact references are context, not a request to resend them.",
+                        text,
+                        "This output and its attachments are already visible to the user. Do not resend attachments from this output.",
                       ].join("\n"),
                       data: {
                         directDelivery: { text },
-                        ...(artifacts ? { runtimeResultArtifacts: artifacts } : {}),
+                        ...(presentation ? { runtimePresentation: presentation } : {}),
                         cron: {
                           sessionId: task.input.workerId,
                           runId: task.input.runId!,
@@ -505,9 +461,9 @@ export function createDeliveryTask(services: OrchestrationServices) {
           }
         }
         await runtime.commit(async (tx) => {
-          if (artifacts) {
-            (await tx.doc(DeliveryRecord, String(task.id), {})).artifacts =
-              artifacts as AgentTurnArtifacts & Record<string, JsonValue>;
+          if (presentation) {
+            (await tx.doc(DeliveryRecord, String(task.id), {})).presentation =
+              presentation as MessagePresentation & Record<string, JsonValue>;
           }
           if (task.input.runId) {
             const doc = await tx.doc(OrchestrationDoc);
@@ -533,8 +489,10 @@ export function createDeliveryTask(services: OrchestrationServices) {
                 assignmentId: String(task.id),
                 text,
                 failed,
-                ...(artifacts
-                  ? { artifacts: artifacts as AgentTurnArtifacts & Record<string, JsonValue> }
+                ...(presentation
+                  ? {
+                      presentation: presentation as MessagePresentation & Record<string, JsonValue>,
+                    }
                   : {}),
               },
             });

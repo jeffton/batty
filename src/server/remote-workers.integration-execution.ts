@@ -5,6 +5,8 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import { getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import { Runtime, context } from "./runtime";
 import { resolveSentFile } from "./send-files";
+import { preparePromptFiles } from "./uploads";
+import { ArtifactLibrary } from "./artifact-library";
 import {
   test,
   storageRoot,
@@ -15,6 +17,8 @@ import {
   connectReverse,
   transcript,
   filesIn,
+  importedRef,
+  withSelectedFiles,
 } from "./remote-workers.integration-fixtures";
 
 export function registerRemoteWorkerExecutionTests() {
@@ -86,6 +90,17 @@ export function registerRemoteWorkerExecutionTests() {
         else {
           await connect(local, remote);
         }
+        await writeFile(join(remote.work, "private-draft.txt"), "unselected draft bytes");
+        await preparePromptFiles(
+          remote.config.uploadsDir,
+          String(remote.runtime.main.id),
+          [{ filename: "selected-input.txt", data: Buffer.from("owner uploaded bytes") }],
+          remote.config.baseUrl,
+        );
+        const library = new ArtifactLibrary(remote.config);
+        const selectedUpload = (await library.list()).find(
+          (item) => item.title === "selected-input.txt",
+        )!;
         let bModelCalls = 0;
         remote.faux.setResponses([
           (request) => {
@@ -97,7 +112,7 @@ export function registerRemoteWorkerExecutionTests() {
               "Unique instance a workspace guidance.",
             );
             expect(getCurrentTools(request.messages).map((tool) => tool.name)).toEqual(
-              expect.arrayContaining(["read", "bash", "attach_files", "subagent"]),
+              expect.arrayContaining(["read", "bash", "import_files", "subagent"]),
             );
             return fauxAssistantMessage([fauxToolCall("read", { path: "origin.txt" })], {
               stopReason: "toolUse",
@@ -110,7 +125,7 @@ export function registerRemoteWorkerExecutionTests() {
             return fauxAssistantMessage(
               [
                 {
-                  ...fauxToolCall("attach_files", { paths: ["origin.txt"] }),
+                  ...fauxToolCall("import_files", { paths: ["origin.txt", "private-draft.txt"] }),
                   id: "call/attachment",
                 },
               ],
@@ -119,10 +134,17 @@ export function registerRemoteWorkerExecutionTests() {
               },
             );
           },
-          fauxAssistantMessage(
-            [fauxToolCall("subagent", { action: "report", prompt: "B progress with evidence" })],
-            { stopReason: "toolUse" },
-          ),
+          (request) =>
+            fauxAssistantMessage(
+              [
+                fauxToolCall("subagent", {
+                  action: "report",
+                  prompt: "B progress with evidence",
+                  artifactRefs: [importedRef(request, "origin.txt"), selectedUpload.ref],
+                }),
+              ],
+              { stopReason: "toolUse" },
+            ),
           fauxAssistantMessage(
             [
               fauxToolCall("bash", {
@@ -132,7 +154,10 @@ export function registerRemoteWorkerExecutionTests() {
             ],
             { stopReason: "toolUse" },
           ),
-          fauxAssistantMessage([fauxText("B final complete")]),
+          (request) =>
+            fauxAssistantMessage([
+              withSelectedFiles("B final complete", importedRef(request, "origin.txt")),
+            ]),
         ]);
         let localStarted = false;
         local.faux.setResponses(
@@ -181,6 +206,13 @@ export function registerRemoteWorkerExecutionTests() {
         }, "B's native bash tool");
         expect(bModelCalls).toBe(2);
         expect(await transcript(local.runtime)).toContain("Awaiting subagent");
+        const remoteId = local.runtime.remotes.list()[0]!.sessionId.split(":")[2]!;
+        const workerContext = (await (await remote.runtime.conversation(remoteId)).context(context))
+          .messages;
+        const reportReply = workerContext.find(
+          (message) => message.role === "toolResult" && message.toolName === "subagent",
+        );
+        expect(reportReply, JSON.stringify(reportReply)).toMatchObject({ isError: false });
         await eventually(
           async () => (await transcript(local.runtime)).includes("B progress with evidence"),
           "streamed progress on A",
@@ -205,6 +237,27 @@ export function registerRemoteWorkerExecutionTests() {
         const worker = await remote.runtime.conversation(id.split(":")[2]!);
         expect((await worker.agent(context)).cwd).toBe(remote.work);
         expect((await worker.agent(context)).model).toMatchObject({ modelId: "model-b" });
+
+        const progress = await nodeRequest<{
+          presentation: { sentFiles: Array<{ name: string }> };
+        }>(
+          local.runtime.remotes.connection(remote.id),
+          "node.command",
+          {
+            requestId: "inspect-selected-progress",
+            command: { action: "inspect", sessionId: id.split(":")[2] },
+          },
+          local.runtime.remotes.requestNode,
+        );
+        expect(progress.presentation.sentFiles.map((file) => file.name)).toEqual([
+          "origin.txt",
+          "selected-input.txt",
+        ]);
+        expect(progress).not.toHaveProperty("details");
+        expect(JSON.stringify(progress)).not.toContain(remote.config.sentFilesDir);
+        expect(
+          (await library.list()).filter((item) => item.title === "selected-input.txt"),
+        ).toHaveLength(1);
 
         // A status request can fail after the last terminal catalog commit; reconnect must resync it.
         remote.failNextAssignmentRequest();
@@ -260,7 +313,11 @@ export function registerRemoteWorkerExecutionTests() {
         expect(JSON.stringify(history)).toContain("B final complete");
         const copied = filesIn(history).find((file) => file.name === "origin.txt");
         expect(copied).toBeDefined();
-        expect(remote.fileRequests.length).toBeGreaterThan(0);
+        expect([...new Set(filesIn(history).map((file) => file.name))].sort()).toEqual([
+          "origin.txt",
+          "selected-input.txt",
+        ]);
+        expect(remote.fileRequests).toHaveLength(2);
         expect(remote.fileRequests.every((url) => !/%2f/i.test(url))).toBe(true);
         expect(copied!.downloadUrl).toContain(`/api/sent-files/remote-${remote.id}/`);
         const segments = new URL(copied!.downloadUrl, local.url).pathname

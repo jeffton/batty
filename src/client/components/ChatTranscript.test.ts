@@ -80,7 +80,6 @@ for (const location of ["history", "tail"] as const) {
   test(`${location} has one details action on the last reply and emits the section key`, async () => {
     const entries = buildTranscriptDisplayEntries(
       messages.map((message) => ({ message, toolStatesByCallId: tools })),
-      tools,
     ).entries;
     const wrapper = mount(ChatTranscript, {
       props: {
@@ -158,7 +157,6 @@ test("artifact-only and error-only replies each render exactly one action stack"
     } as UiMessage;
     const entries = buildTranscriptDisplayEntries(
       [messages[0]!, message].map((message) => ({ message, toolStatesByCallId: tools })),
-      tools,
     ).entries;
     const wrapper = mount(ChatTranscript, {
       props: {
@@ -196,7 +194,6 @@ test("direct cron reply controls reveal only their own source session", async ()
   const entriesFor = (openDetailsSectionKey?: string) =>
     buildTranscriptDisplayEntries(
       sources.map((message) => ({ message, toolStatesByCallId: tools })),
-      tools,
       { openDetailsSectionKey },
     ).entries;
   const wrapper = mount(ChatTranscript, {

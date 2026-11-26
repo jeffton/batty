@@ -1,14 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { rewriteArtifactRow } from "../src/server/artifact-row-codec";
+import { rewriteDiffContentRow } from "../src/server/diff-content-row-codec";
 import {
-  artifactCandidates,
-  artifactColumns,
-  artifactDigest,
-  artifactIdentity,
-  createArtifactStore,
-} from "../src/server/artifact-sqlite";
+  diffContentCandidates,
+  diffContentColumns,
+  diffContentDigest,
+  diffContentIdentity,
+  createDiffContentStore,
+} from "../src/server/diff-content-sqlite";
 
 const [mode, path] = process.argv.slice(2);
 if (
@@ -17,7 +17,7 @@ if (
   !["plan", "apply", "inline", "enable"].includes(mode ?? "")
 ) {
   throw new Error(
-    "Usage: pnpm exec tsx scripts/artifact-dedup.ts plan|apply|inline|enable /path/to/runtime.sqlite",
+    "Usage: pnpm exec tsx scripts/diff-content-dedup.ts plan|apply|inline|enable /path/to/runtime.sqlite",
   );
 }
 const plan = mode === "plan";
@@ -44,7 +44,7 @@ function rewriteDatabase() {
     .get();
   if (!installed && !plan)
     throw new Error("Deploy the artifact-aware runtime before running maintenance");
-  const store = installed ? createArtifactStore(db, false) : undefined;
+  const store = installed ? createDiffContentStore(db, false) : undefined;
   if (inline) db.exec("UPDATE batty_artifact_encoding_v1 SET writes_enabled=0 WHERE id=1");
   if (
     mode === "apply" &&
@@ -64,7 +64,7 @@ function rewriteDatabase() {
   const before = { free: freeBytes(), file: usedBytes() };
   const tables: Record<string, { records: number; serializedBytesSaved: number; lastRow: number }> =
     {};
-  for (const spec of artifactColumns) {
+  for (const spec of diffContentColumns) {
     const { table, column } = spec;
     const delta = "delta" in spec ? "kind = 'delta'" : "0";
     const tableStats = (tables[table] = { records: 0, serializedBytesSaved: 0, lastRow: 0 });
@@ -73,8 +73,8 @@ function rewriteDatabase() {
       `SELECT rowid AS id FROM ${table} WHERE rowid > ? AND rowid <= ? ORDER BY rowid LIMIT 500`,
     );
     const select = db.prepare(
-      `SELECT ${column} AS raw, ${delta} AS delta, ${artifactIdentity(table)} AS identity
-        FROM ${table} WHERE rowid=? AND ${artifactCandidates(column)}`,
+      `SELECT ${column} AS raw, ${delta} AS delta, ${diffContentIdentity(table)} AS identity
+        FROM ${table} WHERE rowid=? AND ${diffContentCandidates(column)}`,
     );
     const update = plan ? undefined : db.prepare(`UPDATE ${table} SET ${column}=? WHERE rowid=?`);
     let cursor = 0;
@@ -94,13 +94,13 @@ function rewriteDatabase() {
         if ((store?.isPacked(table, identity, raw) ?? false) !== inline) continue;
         let rewritten: string;
         if (plan) {
-          rewritten = rewriteArtifactRow(
+          rewritten = rewriteDiffContentRow(
             raw,
             (text) => {
               if (typeof text !== "string") return text;
               const body = JSON.stringify(text);
               const bytes = Buffer.byteLength(body);
-              const digest = artifactDigest(body);
+              const digest = diffContentDigest(body);
               const reference = { [prefix]: digest };
               if (bytes <= JSON.stringify(reference).length) return text;
               if (!known.has(digest)) {
@@ -163,12 +163,12 @@ function rewriteDatabase() {
       ) {
         throw new Error("Artifact write mode changed during inverse verification");
       }
-      for (const { table, column } of artifactColumns) {
+      for (const { table, column } of diffContentColumns) {
         const rows =
           db.prepare(`SELECT r.identity, t.${column} AS raw, r.digest FROM batty_artifact_rows_v1 r
-          JOIN ${table} t ON r.owner=? AND r.identity=${artifactIdentity(table, "t.")}`);
+          JOIN ${table} t ON r.owner=? AND r.identity=${diffContentIdentity(table, "t.")}`);
         for (const row of rows.iterate(table)) {
-          if (row.digest === artifactDigest(row.raw as string)) {
+          if (row.digest === diffContentDigest(row.raw as string)) {
             throw new Error(`Packed row remains: ${table}:${row.identity}`);
           }
         }

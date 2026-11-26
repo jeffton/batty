@@ -4,8 +4,9 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
-import { artifactRefs, createAttachArtifactsTool } from "./artifact-forwarding";
-import { fixture, until } from "./orchestration-test-fixture";
+import { siteLibraryRef } from "@/shared/artifact-library";
+import { fixture, until, withAttachments } from "./orchestration-test-fixture";
+import { entryMessages } from "./runtime";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { orchestrationHistory } from "./orchestration-test-history";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
@@ -20,18 +21,29 @@ const done = () => fauxAssistantMessage([fauxText("ack")]);
 const artifacts = {
   sites: [
     {
-      kind: "browser" as const,
-      id: "browser-artifact",
-      browserId: "live-session",
-      name: "Browser",
-      url: "/browser",
+      kind: "site" as const,
+      id: "discovery-site",
+      name: "Discovery",
+      url: "/discovery",
       public: false as const,
     },
   ],
 };
 
-test("discovery paginates, inspects running reports and archived results, and forwards original artifacts", async () => {
-  const { faux, registry, orchestration, open } = await fixture(1_000_000);
+const siteRef = siteLibraryRef(artifacts.sites[0]!.id);
+
+test("discovery paginates and exposes selected refs without attaching inspected artifacts", async () => {
+  const { faux, registry, orchestration, open } = await fixture(
+    1_000_000,
+    console.error,
+    undefined,
+    undefined,
+    async (_, { artifactRefs }) => {
+      if (!artifactRefs) return {};
+      expect(artifactRefs).toEqual([siteRef]);
+      return artifacts;
+    },
+  );
   let release!: () => void;
   let waiting = false;
   let gate = new Promise<void>((resolve) => {
@@ -41,7 +53,6 @@ test("discovery paginates, inspects running reports and archived results, and fo
     defineExtension({
       name: "discovery-fixture",
       tools: [
-        createAttachArtifactsTool(),
         defineTool({
           name: "pause-discovery",
           description: "Pause worker",
@@ -53,15 +64,6 @@ test("discovery paginates, inspects running reports and archived results, and fo
               output: [{ type: "text", text: "private tool transcript must not be inspected" }],
             };
           },
-        }),
-        defineTool({
-          name: "attach-discovery",
-          description: "Attach browser",
-          parameters: Type.Object({}),
-          execute: async () => ({
-            output: [{ type: "text", text: "attached" }],
-            details: artifacts,
-          }),
         }),
       ],
     }),
@@ -94,17 +96,22 @@ test("discovery paginates, inspects running reports and archived results, and fo
           stopReason: "toolUse",
         });
       if (last.role === "user" && text.includes("worker discovery"))
-        return fauxAssistantMessage([fauxToolCall("attach-discovery", {})], {
-          stopReason: "toolUse",
+        return call({
+          action: "report",
+          prompt: "explicit progress",
+          artifactRefs: [siteRef],
         });
-      if (last.role === "toolResult" && last.toolName === "attach-discovery")
-        return call({ action: "report", prompt: "explicit progress" });
       if (last.role === "toolResult" && text.includes("Reported to parent"))
         return fauxAssistantMessage([fauxToolCall("pause-discovery", {})], {
           stopReason: "toolUse",
         });
-      if (last.role === "toolResult" && last.toolName === "pause-discovery")
-        return fauxAssistantMessage([fauxText("explicit final" + "x".repeat(17_000))]);
+      if (last.role === "toolResult" && last.toolName === "pause-discovery") {
+        const answer = "explicit final" + "x".repeat(17_000);
+        const selected = JSON.stringify(input?.content).includes("worker discovery");
+        return fauxAssistantMessage([
+          fauxText(selected ? withAttachments(answer, { artifactRefs: [siteRef] }) : answer),
+        ]);
+      }
       return done();
     }),
   );
@@ -144,7 +151,8 @@ test("discovery paginates, inspects running reports and archived results, and fo
     expect(await harness.snapshot(OrchestrationDoc, context)).toEqual(beforeInspect);
     expect(await harness.snapshot(WorkerDoc, worker.id, context)).toEqual(beforeWorker);
     expect(JSON.stringify(running.content)).toContain("explicit progress");
-    expect(running.details).toEqual({ referencedArtifacts: artifacts });
+    expect(JSON.stringify(running.content)).toContain(siteRef);
+    expect(running.details).toEqual({ presentation: artifacts });
     expect(JSON.stringify(running.content)).not.toContain("private tool transcript");
     // Cron sessions remain discoverable and inspectable like ordinary workers.
     await main.commit(async (tx) => {
@@ -167,7 +175,8 @@ test("discovery paginates, inspects running reports and archived results, and fo
     expect(body.latest.text).toContain("explicit final");
     expect(body.latest.truncated).toBe(true);
     expect(body.latest.text).not.toContain("private tool transcript");
-    expect(completed.details).toEqual({ referencedArtifacts: artifacts });
+    expect(body.latest.text).toContain(siteRef);
+    expect(completed.details).toEqual({ presentation: artifacts });
     await probe({
       action: "resume",
       sessionId: String(worker.id),
@@ -183,7 +192,8 @@ test("discovery paginates, inspects running reports and archived results, and fo
         (notice) =>
           (notice?.data?.runtimeNotice as { markdown?: string } | undefined)?.markdown === label,
       );
-      expect(notice?.data?.runtimeResultArtifacts).toEqual({ reportAttachments: {} });
+      expect(notice).toBeDefined();
+      expect(notice?.data?.runtimePresentation ?? {}).toEqual({});
     }
     const inspection = await probe({ action: "inspect", sessionId: String(worker.id) });
     const inspectionBody = JSON.parse((inspection.content[0] as { text: string }).text);
@@ -234,26 +244,20 @@ test("discovery paginates, inspects running reports and archived results, and fo
     release();
     await until(async () => (await orchestration.listRunning()).length === 0);
     await main.waitForIdle(context);
+    const visibleSites = async () =>
+      entryMessages((await main.context(context)).entries).flatMap((message) =>
+        message.role === "assistant" ? (message.sites ?? []) : [],
+      );
+    expect(await visibleSites()).toEqual([]);
     faux.setResponses([
-      fauxAssistantMessage(
-        [
-          fauxToolCall("attach_artifacts", {
-            refs: artifactRefs(artifacts).map((item) => item.ref),
-          }),
-        ],
-        { stopReason: "toolUse" },
-      ),
-      done(),
+      fauxAssistantMessage([
+        fauxText(withAttachments("chosen inspected artifact", { artifactRefs: [siteRef] })),
+      ]),
     ]);
     await (
-      await main.submit({ type: "input", content: "forward inspected artifact" }, context)
+      await main.submit({ type: "input", content: "deliver inspected artifact" }, context)
     ).wait(context);
-    const forwarded = (await main.context(context)).messages.findLast(
-      (message) => message.role === "toolResult" && message.toolName === "attach_artifacts",
-    );
-    expect(forwarded?.role === "toolResult" && forwarded.details).toMatchObject({
-      forwardedArtifacts: artifacts,
-    });
+    expect(await visibleSites()).toEqual(artifacts.sites);
   } finally {
     release();
   }

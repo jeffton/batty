@@ -10,7 +10,8 @@ import { defineExtension, defineTool, type ConversationId } from "@earendil-work
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
 import { fixture, until } from "./orchestration-test-fixture";
-import { artifactRefs } from "./artifact-forwarding";
+import { fileLibraryRef } from "@/shared/artifact-library";
+import { ArtifactLibrary } from "./artifact-library";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { storeSentFiles } from "./send-files";
 import {
@@ -301,7 +302,23 @@ test("local run/queue/steer/resume deliver immutable files and native image bloc
 });
 
 test("a caller can send a received file ref, but cannot invent refs or use files on lifecycle queries", async () => {
-  const { directory, faux, registry, open, orchestration } = await fixture();
+  const { directory, faux, registry, open, orchestration } = await fixture(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    (directory) => {
+      const library = new ArtifactLibrary({
+        battyDir: directory,
+        sentFilesDir: join(directory, "sent-files"),
+        sitesDir: join(directory, "sites"),
+        uploadsDir: join(directory, "uploads"),
+        baseUrl: "/",
+      });
+      return (ref) => library.resolveFileSource(ref);
+    },
+  );
   const original = join(directory, "report.txt");
   await writeFile(original, "referenced attachment bytes");
   const [file] = await storeSentFiles({
@@ -312,7 +329,7 @@ test("a caller can send a received file ref, but cannot invent refs or use files
     cwd: directory,
     paths: [original],
   });
-  const ref = artifactRefs({ sentFiles: [file!] })[0]!.ref;
+  const ref = fileLibraryRef(file!.id);
   registry.install(
     defineExtension({
       name: "worker-file-seed",

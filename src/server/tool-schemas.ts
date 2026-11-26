@@ -2,8 +2,8 @@ import { StringEnum } from "./schema-enum";
 import { Type } from "typebox";
 export const SitesToolSchema = Type.Object(
   {
-    action: StringEnum(["create", "share", "delete", "function", "delete_function"] as const, {
-      description: "Create/share/delete a site, or register/remove a site-scoped backend function.",
+    action: StringEnum(["create", "delete", "function", "delete_function"] as const, {
+      description: "Create/delete a site, or register/remove a site-scoped backend function.",
     }),
     functionName: Type.Optional(
       Type.String({ description: "Backend function name for function/delete_function." }),
@@ -18,7 +18,7 @@ export const SitesToolSchema = Type.Object(
       Type.String({ description: "Display name. Required when creating a site." }),
     ),
     siteId: Type.Optional(
-      Type.String({ description: "Site id. Required when sharing or deleting a site." }),
+      Type.String({ description: "Site ID for operations on an existing site." }),
     ),
   },
   { additionalProperties: false },
@@ -77,11 +77,11 @@ export const WebSearchOutputSchema = Type.Union([
 
 export { BrowserToolSchema } from "./browser-schemas";
 
-export const AttachFilesToolSchema = Type.Object(
+export const ImportFilesToolSchema = Type.Object(
   {
-    paths: Type.Array(Type.String({ description: "Path to a file to attach for the user." }), {
+    paths: Type.Array(Type.String({ description: "Path to a file to import." }), {
       minItems: 1,
-      description: "Files to copy into Batty storage and expose as downloads for the user.",
+      description: "Files to snapshot into the local artifact library.",
     }),
   },
   {

@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import mime from "mime-types";
 import type { SentFileDescriptor } from "@/shared/types";
+import { missingFile, storageDirectories } from "./artifact-storage";
 
 interface StoredSentFileRecord {
   id: string;
@@ -48,6 +49,7 @@ export interface ResolvedSentFile {
 }
 
 const MANIFEST_FILE_NAME = "manifest.json";
+export const NODE_EXPORTS_WORKSPACE = "node-exports";
 
 function sanitizeStorageSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-");
@@ -122,10 +124,9 @@ function toDescriptor(
     mimeType: file.mimeType,
     kind: file.kind,
     downloadUrl: sentFileUrl(baseUrl, workspaceId, sessionId, toolCallId, file.id, true),
-    previewUrl:
-      file.kind === "image" || file.kind === "video"
-        ? sentFileUrl(baseUrl, workspaceId, sessionId, toolCallId, file.id, false)
-        : undefined,
+    ...(file.kind === "image" || file.kind === "video"
+      ? { previewUrl: sentFileUrl(baseUrl, workspaceId, sessionId, toolCallId, file.id, false) }
+      : {}),
   };
 }
 
@@ -140,6 +141,39 @@ async function readManifest(
     MANIFEST_FILE_NAME,
   );
   return JSON.parse(await fs.readFile(manifestPath, "utf8")) as StoredSentFileManifest;
+}
+
+export async function* storedSentFiles(rootDir: string, baseUrl: string, fileId?: string) {
+  for (const workspace of await storageDirectories(rootDir)) {
+    const workspaceName = path.basename(workspace);
+    if (workspaceName === NODE_EXPORTS_WORKSPACE) continue;
+    for (const session of await storageDirectories(workspace)) {
+      if (workspaceName === "worker-inputs" && path.basename(session) === "inputs") {
+        continue;
+      }
+      for (const call of await storageDirectories(session)) {
+        try {
+          const manifest = await readManifest(
+            rootDir,
+            path.basename(workspace),
+            path.basename(session),
+            path.basename(call),
+          );
+          const { workspaceId, sessionId, toolCallId } = manifest;
+          for (const file of manifest.files) {
+            if (fileId !== undefined && file.id !== fileId) continue;
+            yield {
+              file: toDescriptor(baseUrl, workspaceId, sessionId, toolCallId, file),
+              createdAt: manifest.createdAt,
+              location: { workspaceId, sessionId, toolCallId, fileId: file.id },
+            };
+          }
+        } catch (error) {
+          if (!missingFile(error)) throw error;
+        }
+      }
+    }
+  }
 }
 
 export async function storeSentFiles(

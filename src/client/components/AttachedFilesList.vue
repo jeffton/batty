@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { reactive } from "vue";
+import AttachedFileDownload from "./AttachedFileDownload.vue";
 import TranscriptImage from "./TranscriptImage.vue";
+import { fileThumbnailUrl, imageViewerUrl } from "@/client/lib/file-preview";
 import type { SentFileDescriptor } from "@/shared/types";
 
 const props = withDefaults(
@@ -14,44 +15,6 @@ const props = withDefaults(
     compact: false,
   },
 );
-
-const downloadErrors = reactive(new Map<string, string>());
-const downloading = reactive(new Set<string>());
-
-async function downloadSentFile(event: MouseEvent, file: SentFileDescriptor): Promise<void> {
-  event.preventDefault();
-  if (downloading.has(file.id)) return;
-  downloading.add(file.id);
-  downloadErrors.delete(file.id);
-  try {
-    const response = await fetch(file.downloadUrl, { credentials: "include" });
-    if (!response.ok) {
-      downloadErrors.set(file.id, `Download failed (HTTP ${response.status}).`);
-      return;
-    }
-    downloadBlob(await response.blob(), file.name);
-  } catch (error) {
-    downloadErrors.set(
-      file.id,
-      `Download failed: ${error instanceof Error ? error.message : error}`,
-    );
-  } finally {
-    downloading.delete(file.id);
-  }
-}
-
-function downloadBlob(blob: Blob, name: string): void {
-  // Blob downloads keep iOS standalone apps out of the native URL preview.
-  const objectUrl = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = objectUrl;
-  link.download = name;
-  link.style.display = "none";
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
-}
 
 function formatFileSize(size: number): string {
   if (!Number.isFinite(size) || size < 1024) {
@@ -76,12 +39,8 @@ function formatFileSize(size: number): string {
     <article v-for="file in props.files" :key="file.id" class="attached-files__card">
       <TranscriptImage
         v-if="props.preview && file.kind === 'image' && file.previewUrl"
-        :src="`${file.previewUrl}${file.previewUrl.includes('?') ? '&' : '?'}preview=1`"
-        :original-url="
-          file.mimeType === 'image/svg+xml'
-            ? `${file.previewUrl}${file.previewUrl.includes('?') ? '&' : '?'}preview=1`
-            : file.previewUrl
-        "
+        :src="fileThumbnailUrl(file.previewUrl)"
+        :original-url="imageViewerUrl(file, file.previewUrl)"
         :alt="file.name"
       />
       <video
@@ -100,18 +59,7 @@ function formatFileSize(size: number): string {
         >
       </div>
 
-      <a
-        :href="file.downloadUrl"
-        :download="file.name"
-        :aria-disabled="downloading.has(file.id)"
-        class="attached-files__download"
-        @click="downloadSentFile($event, file)"
-      >
-        Download
-      </a>
-      <span v-if="downloadErrors.has(file.id)" role="alert" class="attached-files__error">
-        {{ downloadErrors.get(file.id) }}
-      </span>
+      <AttachedFileDownload :file="file" class="attached-files__download" />
     </article>
   </div>
 </template>
@@ -133,10 +81,6 @@ function formatFileSize(size: number): string {
   border: 1px solid var(--color-border);
   border-radius: 0.65rem;
   background: var(--color-bg-panel);
-}
-
-.attached-files__error {
-  color: var(--color-error);
 }
 
 .attached-files__preview {
@@ -165,7 +109,7 @@ function formatFileSize(size: number): string {
   overflow-wrap: anywhere;
 }
 
-.attached-files__download {
+.attached-files :deep(.attached-files__download) {
   justify-self: start;
   color: var(--color-accent);
   text-decoration: none;
@@ -173,7 +117,7 @@ function formatFileSize(size: number): string {
 }
 
 @media (hover: hover) {
-  .attached-files__download:hover {
+  .attached-files :deep(.attached-files__download:hover) {
     text-decoration: underline;
   }
 }

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import mime from "mime-types";
 import type { SiteDescriptor } from "@/shared/types";
+import { publishJson, storageDirectories } from "./artifact-storage";
 
 interface SiteManifest {
   id: string;
@@ -64,6 +65,19 @@ async function readManifest(rootDir: string, siteId: string): Promise<SiteManife
   }
 }
 
+export async function listStoredSites(rootDir: string, baseUrl: string) {
+  const records: { site: SiteDescriptor; createdAt: number }[] = [];
+  for (const directory of await storageDirectories(rootDir)) {
+    try {
+      const manifest = await readManifest(rootDir, path.basename(directory));
+      records.push({ site: descriptor(manifest, baseUrl), createdAt: manifest.createdAt });
+    } catch (error) {
+      if ((error as { statusCode?: number }).statusCode !== 404) throw error;
+    }
+  }
+  return records;
+}
+
 export async function createSite(
   rootDir: string,
   baseUrl: string,
@@ -79,11 +93,7 @@ export async function createSite(
     createdAt: Date.now(),
   };
   await fs.mkdir(directory, { recursive: true });
-  await fs.writeFile(
-    path.join(siteDirectory(rootDir, id), MANIFEST_FILE),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    "utf8",
-  );
+  await publishJson(path.join(siteDirectory(rootDir, id), MANIFEST_FILE), manifest);
   const site = descriptor(manifest, baseUrl);
   return {
     descriptor: site,
@@ -119,11 +129,7 @@ export async function setSitePublic(
 ): Promise<SiteDescriptor> {
   const manifest = await readManifest(rootDir, siteId);
   manifest.public = isPublic;
-  await fs.writeFile(
-    path.join(siteDirectory(rootDir, siteId), MANIFEST_FILE),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    "utf8",
-  );
+  await publishJson(path.join(siteDirectory(rootDir, siteId), MANIFEST_FILE), manifest);
   return descriptor(manifest, baseUrl);
 }
 

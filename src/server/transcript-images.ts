@@ -8,8 +8,10 @@ import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
 
 const pending = new Map<string, Promise<void>>();
 
-export async function imagePreview(filePath: string): Promise<Buffer> {
-  const previewPath = `${filePath}.preview.webp`;
+export async function imagePreview(
+  filePath: string,
+  previewPath = `${filePath}.preview.webp`,
+): Promise<Buffer> {
   try {
     return await fs.readFile(previewPath);
   } catch (error) {
@@ -21,6 +23,7 @@ export async function imagePreview(filePath: string): Promise<Buffer> {
     .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 75 })
     .toBuffer();
+  await fs.mkdir(path.dirname(previewPath), { recursive: true });
   await fs.writeFile(previewPath, data);
   return data;
 }

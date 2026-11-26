@@ -12,6 +12,8 @@ const carriers = [
   "referencedArtifacts",
   "reportAttachments",
   "runtimeResultArtifacts",
+  "battyPresentation",
+  "runtimePresentation",
   "model",
   "details",
   "calls",
@@ -36,8 +38,8 @@ const carriers = [
   "nestedTools",
 ];
 const maps = new Set(["workers", "resultArtifacts", "memos", "tools", "nestedTools"]);
-export const artifactKeys = [...snapshotArrays, ...patchArrays, "batty-agent-turn-file-changes"];
-const mayContainArtifact = new RegExp(artifactKeys.join("|"));
+export const diffContentKeys = [...snapshotArrays, ...patchArrays, "batty-agent-turn-file-changes"];
+const mayContainDiffContent = new RegExp(diffContentKeys.join("|"));
 
 function bag(value: unknown): Bag | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Bag) : undefined;
@@ -57,6 +59,7 @@ function rewriteNotice(content: string, rewrite: RewriteLeaf): string {
   const notice = decodeRuntimeNotice(content);
   if (!notice || encodeRuntimeNotice(notice) !== content) return content;
   rewriteCarrier(notice.data?.runtimeResultArtifacts, rewrite);
+  rewriteCarrier(notice.data?.runtimePresentation, rewrite);
   return encodeRuntimeNotice(notice);
 }
 
@@ -121,8 +124,8 @@ function rewriteOperations(operations: unknown[], rewrite: RewriteLeaf): void {
   }
 }
 
-export function rewriteArtifactRow(raw: string, rewrite: RewriteLeaf, delta = false): string {
-  if (!mayContainArtifact.test(raw)) return raw;
+export function rewriteDiffContentRow(raw: string, rewrite: RewriteLeaf, delta = false): string {
+  if (!mayContainDiffContent.test(raw)) return raw;
   const value: unknown = JSON.parse(raw);
   let changed = false;
   const track: RewriteLeaf = (value) => {

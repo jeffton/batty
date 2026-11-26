@@ -9,7 +9,7 @@ import {
 import type { Context } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
 import type { CronRun } from "./orchestration";
-import type { AgentTurnArtifacts } from "./agent-turn-file-changes";
+import type { MessagePresentation } from "./message-presentation";
 
 export type WorkerRecord = {
   id: ConversationId;
@@ -41,8 +41,10 @@ export const DeliveryRecord = defineDocFamily<
     call?: { workerId: string; taskId: TaskId<string> };
     join?: TaskId;
     joinConsumed?: boolean;
-    artifacts?: AgentTurnArtifacts & Record<string, JsonValue>;
+    joinPresentationTask?: TaskId;
+    presentation?: MessagePresentation & Record<string, JsonValue>;
     directDelivered?: boolean;
+    progressContent?: string;
   },
   Record<string, never>
 >({

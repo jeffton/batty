@@ -6,7 +6,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { SentFileDescriptor } from "../shared/types";
 import { storeSentFiles } from "./send-files";
-import { artifactRefs, artifactsFromModelMessages } from "./artifact-forwarding";
+
 import type { WorkerCommandContext } from "./orchestration-workers";
 import type { Context } from "@earendil-works/chord/context";
 import type { UserMessage } from "@earendil-works/pi-ai";
@@ -163,6 +163,7 @@ export async function snapshotWorkerFiles(
   sources: WorkerFileSource[],
   api: WorkerCommandContext,
   ctx: Context,
+  resolveFileSource?: (ref: string) => Promise<{ name: string; path: string }>,
 ): Promise<WorkerInputFile[]> {
   const key = `tool:${api.conversationId}:${api.taskId}`;
   return serialized(location(storage, key).receipt, async () => {
@@ -170,27 +171,14 @@ export async function snapshotWorkerFiles(
     if (ready) return ready;
     if (!sources.length || sources.length > MAX_FILES)
       throw new Error(`Select 1–${MAX_FILES} files`);
-    const wanted = new Set(sources.flatMap((source) => ("ref" in source ? [source.ref] : [])));
-    const refs = new Map<string, SentFileDescriptor & { storedPath?: string }>();
-    if (wanted.size)
-      await api.commit(async (tx) => {
-        let cursor;
-        do {
-          const page = await tx.scanEntries({ conversationId: api.conversationId }, 200, cursor);
-          for (const entry of page.items)
-            for (const artifacts of artifactsFromModelMessages(entry.model ?? []))
-              for (const item of artifactRefs(artifacts))
-                if (item.kind === "file" && wanted.has(item.ref)) refs.set(item.ref, item.value);
-          cursor = page.next;
-        } while (cursor && refs.size < wanted.size);
-      }, ctx);
-    const paths = sources.map((source) => {
-      if ("path" in source) return source.path;
-      const file = refs.get(source.ref);
-      if (!file?.storedPath)
-        throw new Error(`File ref not available in this conversation: ${source.ref}`);
-      return file.storedPath;
-    });
+    const selected = await Promise.all(
+      sources.map((source) => {
+        if ("path" in source) return { path: source.path, name: path.basename(source.path) };
+        if (!resolveFileSource) throw new Error("Worker artifact storage is not configured");
+        return resolveFileSource(source.ref);
+      }),
+    );
+    const paths = selected.map((file) => file.path);
     const cwd = (await api.agent(ctx)).cwd!;
     let total = 0;
     for (const source of paths) {
@@ -199,10 +187,13 @@ export async function snapshotWorkerFiles(
       total += stat.size;
     }
     if (total > MAX_WORKER_FILE_BYTES) throw new Error("Worker files exceed 100 MiB per message");
-    const names = sources.map((source, index) =>
-      "ref" in source ? refs.get(source.ref)!.name : path.basename(paths[index]!),
+    return save(
+      storage,
+      key,
+      paths,
+      cwd,
+      selected.map((file) => file.name),
     );
-    return save(storage, key, paths, cwd, names);
   });
 }
 

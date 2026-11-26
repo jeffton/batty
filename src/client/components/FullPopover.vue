@@ -61,7 +61,7 @@ onBeforeUnmount(removeFromStack);
     <header class="full-popover__header">
       <div class="full-popover__heading">
         <slot name="heading">
-          <div class="full-popover__title">{{ props.title }}</div>
+          <div class="full-popover__title" :title="props.title">{{ props.title }}</div>
         </slot>
         <div v-if="props.subtitle" class="full-popover__subtitle">{{ props.subtitle }}</div>
       </div>
@@ -142,6 +142,9 @@ onBeforeUnmount(removeFromStack);
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--color-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .full-popover__subtitle {

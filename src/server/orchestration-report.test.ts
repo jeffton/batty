@@ -4,51 +4,61 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
-import { artifactRefs, createAttachArtifactsTool } from "./artifact-forwarding";
+import { fileLibraryRef, siteLibraryRef } from "@/shared/artifact-library";
 import { decodeRuntimeNotice } from "./runtime-notices";
-import { fixture, until } from "./orchestration-test-fixture";
+import { entryMessages } from "./runtime";
+import { fixture, until, withAttachments } from "./orchestration-test-fixture";
 import { orchestrationHistory } from "./orchestration-test-history";
 
-const artifacts = {
-  sentFiles: [
-    {
-      id: "report-file",
-      name: "report.png",
-      storedPath: "/tmp/report.png",
-      size: 1,
-      mimeType: "image/png",
-      kind: "image" as const,
-      downloadUrl: "/api/sent-files/report-file",
-    },
-  ],
-  fileChanges: [{ path: "report.ts", patch: "immutable patch" }],
-  sites: [
-    {
-      kind: "site" as const,
-      id: "report-site",
-      name: "Report site",
-      url: "/site",
-      public: false as const,
-    },
-    {
-      kind: "browser" as const,
-      id: "report-browser",
-      browserId: "same-live-browser",
-      name: "Browser",
-      url: "/browser",
-      public: false as const,
-    },
-  ],
+const file = {
+  id: "report-file",
+  name: "report.png",
+  storedPath: "/tmp/report.png",
+  size: 1,
+  mimeType: "image/png",
+  kind: "image" as const,
+  downloadUrl: "/api/sent-files/report-file",
 };
+const site = {
+  kind: "site" as const,
+  id: "report-site",
+  name: "Report site",
+  url: "/site",
+  public: false as const,
+};
+const browser = {
+  kind: "browser" as const,
+  id: "report-browser",
+  browserId: "same-live-browser",
+  name: "Browser",
+  url: "/browser",
+  public: false as const,
+};
+const artifacts = { sentFiles: [file], sites: [site, browser] };
+const fileRef = fileLibraryRef(file.id);
+const siteRef = siteLibraryRef(site.id);
+const browserId = browser.browserId;
 
 test.each([false, true])(
-  "nonterminal report forwards artifacts only to actual parent (nested=%s)",
+  "nonterminal report selects attachments only for the actual parent (nested=%s)",
   async (nested) => {
-    // The coordinator parent may delegate this nested report across workspaces.
-    const { faux, orchestration, open, registry } = await fixture(10_000, console.error, "other");
+    const { faux, orchestration, open, registry } = await fixture(
+      10_000,
+      console.error,
+      "other",
+      undefined,
+      async (_, selection) => {
+        expect(selection.browserId).toBe(browserId);
+        if (selection.artifactRefs) {
+          expect(selection.artifactRefs).toEqual([fileRef, siteRef]);
+          return artifacts;
+        }
+        return { sites: [browser] };
+      },
+    );
     let release!: () => void;
     let continued = false;
-    let forwarded = false;
+    let progressInput = "";
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
@@ -56,16 +66,6 @@ test.each([false, true])(
       defineExtension({
         name: "progress-fixture",
         tools: [
-          createAttachArtifactsTool(),
-          defineTool({
-            name: "attach-progress",
-            description: "Attach all artifact kinds",
-            parameters: Type.Object({}),
-            execute: async () => ({
-              output: [{ type: "text", text: "attached progress" }],
-              details: artifacts as unknown as JsonValue,
-            }),
-          }),
           defineTool({
             name: "continue-working",
             description: "Continue after reporting",
@@ -107,20 +107,25 @@ test.each([false, true])(
             workspaceId: "test",
           });
         if (last.role === "user" && text.includes("inner assignment"))
-          return call("attach-progress", {});
-        if (last.role === "toolResult" && last.toolName === "attach-progress")
-          return call("subagent", { action: "report", prompt: "intermediate evidence" });
+          return call("subagent", {
+            action: "report",
+            prompt: "intermediate evidence",
+            artifactRefs: [fileRef, siteRef],
+            browserId,
+          });
         if (last.role === "toolResult" && text.includes("Reported to parent"))
           return call("continue-working", {});
         if (last.role === "toolResult" && last.toolName === "continue-working")
           return fauxAssistantMessage([fauxText("inner final")]);
-        if (last.role === "user" && text.includes("intermediate evidence"))
-          return call("attach_artifacts", {
-            refs: artifactRefs(artifacts).map((item) => item.ref),
-          });
-        if (last.role === "toolResult" && last.toolName === "attach_artifacts") {
-          forwarded = true;
-          return fauxAssistantMessage([fauxText("progress acknowledged")]);
+        if (last.role === "user" && text.includes("intermediate evidence")) {
+          progressInput = text;
+          return fauxAssistantMessage([
+            fauxText(
+              nested
+                ? "progress acknowledged"
+                : withAttachments("progress acknowledged", { browserId }),
+            ),
+          ]);
         }
         if (
           last.role === "toolResult" &&
@@ -142,7 +147,8 @@ test.each([false, true])(
       await (
         await main.submit({ type: "input", content: "launch progress" }, context)
       ).wait(context);
-      await until(async () => continued && forwarded);
+      await until(async () => continued && progressInput.includes(siteRef));
+      expect(progressInput).toContain(fileRef);
       const state = (await orchestrationHistory(harness))!;
       const child = Object.values(state.workers).find(
         (worker) => worker.prompt === "inner assignment",
@@ -156,16 +162,7 @@ test.each([false, true])(
         notice?.text.startsWith(`[subagent ${child.id} report]`),
       );
       expect(progress).toHaveLength(1);
-      expect(progress[0]!.data!.runtimeResultArtifacts).toEqual({
-        ...artifacts,
-        reportAttachments: {},
-      });
-      const forwardedResult = (await parent.context(context)).messages.findLast(
-        (message) => message.role === "toolResult" && message.toolName === "attach_artifacts",
-      );
-      expect(forwardedResult?.role === "toolResult" && forwardedResult.details).toMatchObject({
-        forwardedArtifacts: artifacts,
-      });
+      expect(progress[0]!.data!.runtimePresentation).toEqual(artifacts);
       if (nested) {
         expect(JSON.stringify((await main.context(context)).messages)).not.toContain(
           "intermediate evidence",
@@ -180,8 +177,15 @@ test.each([false, true])(
     }
     await until(async () => (await orchestration.listRunning()).length === 0);
     await main.waitForIdle(context);
-    const history = JSON.stringify((await main.context(context)).messages);
-    expect(history).toContain(nested ? "outer final" : "inner final");
+    const { entries, messages } = await main.context(context);
+    const final = messages
+      .flatMap((message) => (message.role === "user" ? [decodeRuntimeNotice(message.content)] : []))
+      .find((notice) => notice?.text.includes(nested ? "outer final" : "inner final"));
+    expect(final).toBeDefined();
+    expect(final?.data?.runtimePresentation).toBeUndefined();
+    const replies = entryMessages(entries).filter((message) => message.role === "assistant");
+    expect(replies.flatMap((message) => message.sites ?? [])).toEqual(nested ? [] : [browser]);
+    expect(replies.flatMap((message) => message.sentFiles ?? [])).toEqual([]);
   },
 );
 

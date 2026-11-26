@@ -1,5 +1,6 @@
 import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
 import { orchestrationHooks } from "./orchestration-hooks.js";
+import { presentationHook } from "./presentation-hook";
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
@@ -43,6 +44,7 @@ const context = BACKGROUND_CONTEXT;
 export function createOrchestration(
   input: OrchestrationConfig | AppConfig = {},
   networkAvailable: () => Promise<boolean> = async () => true,
+  presentation?: Pick<OrchestrationConfig, "resolvePresentation" | "resolveFileSource">,
 ) {
   const options: OrchestrationConfig =
     "workspacesRoots" in input
@@ -85,6 +87,15 @@ export function createOrchestration(
     return found;
   };
   const services: OrchestrationServices = {
+    resolvePresentation:
+      presentation?.resolvePresentation ??
+      options.resolvePresentation ??
+      (async (_conversation, selection) => {
+        if (selection.artifactRefs?.length || selection.browserId)
+          throw new Error("Attachment storage is not configured");
+        return {};
+      }),
+    resolveFileSource: presentation?.resolveFileSource ?? options.resolveFileSource,
     fileStorage: options.fileStorage,
     get remoteWorkers() {
       return remoteWorkers;
@@ -126,7 +137,7 @@ export function createOrchestration(
     name: "batty-orchestration",
     tools: [subagent, cron],
     tasks: [Anchor, AwaitChild, Delivery, nodeCommands.Command, RemoteJoin],
-    hooks: orchestrationHooks(services),
+    hooks: [...orchestrationHooks(services), presentationHook(services)],
   });
   return {
     extension,
@@ -154,11 +165,7 @@ export function createOrchestration(
           for (const [id, join] of Object.entries(doc.joins ?? {})) {
             (await tx.doc(DeliveryRecord, id, {})).join = join;
           }
-          for (const [id, artifacts] of Object.entries(doc.resultArtifacts ?? {})) {
-            (await tx.doc(DeliveryRecord, id, {})).artifacts = artifacts;
-          }
           delete doc.joins;
-          delete doc.resultArtifacts;
           for (const [id, input] of Object.entries(doc.joinParents ?? {})) {
             if (!(await tx.doc(LiveDoc, Number(id) as ConversationId)).run?.inputs.includes(input))
               delete doc.joinParents![id];

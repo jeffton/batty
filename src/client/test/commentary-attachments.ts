@@ -35,8 +35,7 @@ export const browserAttachment: SiteAttachmentDescriptor = {
 };
 export const changes = [{ path: "notes.md", patch: "@@ -1 +1 @@\n-old\n+new\n" }];
 
-// Native codemode outputs can coincide with server-projected explicit forwards.
-// Received child reports must never become implicit response attachments.
+// Tool result metadata must not expose unselected files.
 export function commentaryAttachments(): UiMessage[] {
   return [
     {
@@ -62,38 +61,10 @@ export function commentaryAttachments(): UiMessage[] {
       toolCallId: "code",
       toolName: "codemode",
       isError: false,
-      blocks: [],
+      blocks: [{ type: "text", text: "Prepared timelapse." }],
       details: {
-        sentFiles: [video, image, { ...video, id: "child", name: "Unselected child.mp4" }],
-        sites: [site],
-        calls: [
-          {
-            id: "native",
-            name: "attach_files",
-            args: "{}",
-            status: "ok",
-            sentFiles: [video, image],
-          },
-          { id: "native-site", name: "sites", args: "{}", status: "ok", sites: [site] },
-          {
-            id: "child",
-            name: "subagent",
-            args: "{}",
-            status: "ok",
-            sentFiles: [{ ...video, id: "child", name: "Unselected child.mp4" }],
-          },
-          {
-            id: "forward",
-            name: "attach_artifacts",
-            args: "{}",
-            status: "ok",
-            forwardedArtifacts: {
-              sentFiles: [video],
-              sites: [site, browserAttachment],
-              fileChanges: changes,
-            },
-          },
-        ],
+        sentFiles: [{ ...video, id: "child", name: "Unselected child.mp4" }],
+        calls: [{ id: "import", name: "import_files", args: "{}", status: "ok" }],
       },
     },
     {
@@ -106,7 +77,7 @@ export function commentaryAttachments(): UiMessage[] {
         { type: "text", text: "Here is the timelapse." },
         { type: "toolCall", id: "wait", name: "subagent", arguments: { action: "await" } },
       ],
-      sentFiles: [video],
+      sentFiles: [video, image],
       sites: [site, browserAttachment],
       fileChanges: changes,
     },

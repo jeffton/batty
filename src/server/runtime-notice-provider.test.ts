@@ -12,11 +12,9 @@ import {
   CompactionTask,
   hook,
   Harness,
-  type EntryRecord,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { artifactRefs, reportWithArtifacts } from "./artifact-forwarding";
-import { runtimeResultArtifacts } from "./runtime-result-artifacts";
+import { describePresentation, type MessagePresentation } from "./message-presentation";
 import {
   decodeRuntimeNotice,
   encodeRuntimeNotice,
@@ -26,18 +24,27 @@ import {
 
 function report() {
   const body = "private-diff-body ".repeat(120_000);
-  const artifacts = {
+  const artifacts: MessagePresentation = {
     fileChanges: [{ path: "/workspace/file.ts", patch: body }],
-    battyFileChanges: [{ path: "/workspace/other.ts", before: body, after: `${body}changed` }],
+    sentFiles: [
+      {
+        id: "proof",
+        name: "proof.txt",
+        mimeType: "text/plain",
+        kind: "file",
+        size: 1,
+        downloadUrl: "/files/proof",
+      },
+    ],
   };
-  const text = reportWithArtifacts("Worker done", artifacts);
+  const text = describePresentation("Worker done", artifacts);
   return {
     artifacts,
     text,
     content: encodeRuntimeNotice({
       kind: "subagent",
       text,
-      data: { runtimeResultArtifacts: artifacts },
+      data: { runtimePresentation: artifacts },
     }),
   };
 }
@@ -53,10 +60,7 @@ test("new report projection keeps refs and images while durable attachment bodie
   const projected = projectRuntimeNoticeRequest({ messages: [message] });
   expect(projected.messages[0]).toEqual({ ...message, content: [{ type: "text", text }, image] });
   expect((projected.messages[0]!.content as unknown[])[1]).toBe(image);
-  expect(decodeRuntimeNotice(message.content)?.data?.runtimeResultArtifacts).toEqual(artifacts);
-  const recovered = runtimeResultArtifacts([{ model: [message] } as unknown as EntryRecord]);
-  expect(artifactRefs(recovered).map(({ ref }) => ref)).toContain(artifactRefs(artifacts)[0]!.ref);
-  expect(recovered.fileChanges).toContainEqual(artifacts.fileChanges[0]);
+  expect(decodeRuntimeNotice(message.content)?.data?.runtimePresentation).toEqual(artifacts);
 });
 
 test("repeated artifact reports do not trigger compaction but real model text does", async () => {
@@ -122,7 +126,9 @@ test("repeated artifact reports do not trigger compaction but real model text do
     const stored = (await worker.entries({}, 100, undefined, context)).items;
     const preserved = stored.filter((entry) => entry.model?.[0]?.content === content);
     expect(preserved).toHaveLength(3);
-    expect(runtimeResultArtifacts(preserved).fileChanges).toContainEqual(artifacts.fileChanges[0]);
+    expect(
+      decodeRuntimeNotice(preserved[0]!.model![0]!.content)?.data?.runtimePresentation,
+    ).toEqual(artifacts);
     await (
       await worker.submit({ type: "input", content: "Real work ".repeat(4000) }, context)
     ).wait(context);
@@ -208,7 +214,7 @@ test("generation and native compaction exclude historical multi-megabyte artifac
       true,
     );
     expect(requests[0]).toContain("Worker done");
-    expect(requests[0]).toContain(artifactRefs(artifacts)[0]!.ref);
+    expect(requests[0]).toContain("file:proof");
     const result = await (await worker.submit({ type: "input", content }, context)).wait(context);
     expect(result.status).toBe("done");
     expect(requests.at(-1)).toContain(text.split("\n")[0]!);
@@ -218,7 +224,7 @@ test("generation and native compaction exclude historical multi-megabyte artifac
       .flatMap((entry) => entry.model ?? [])
       .filter((message) => message.role === "user" && message.content === content);
     expect(originalReports).toHaveLength(2);
-    expect(decodeRuntimeNotice(originalReports[0]!.content)?.data?.runtimeResultArtifacts).toEqual(
+    expect(decodeRuntimeNotice(originalReports[0]!.content)?.data?.runtimePresentation).toEqual(
       artifacts,
     );
   } finally {

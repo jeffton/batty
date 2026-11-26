@@ -18,7 +18,7 @@ import type { WorkspaceInfo } from "../shared/types.js";
 
 import { type RuntimeNotice } from "./runtime-notices.js";
 
-import type { AgentTurnArtifacts } from "./agent-turn-file-changes.js";
+import type { AttachmentSelection, MessagePresentation } from "./message-presentation.js";
 
 import { type WorkerRecord } from "./orchestration-history";
 
@@ -84,7 +84,6 @@ export const OrchestrationDoc = defineDoc<{
   workers: Record<string, Worker>;
   calls: Record<string, { workerId: string; taskId: TaskId<string> }>;
   joins?: Record<string, TaskId>;
-  resultArtifacts?: Record<string, AgentTurnArtifacts & Record<string, JsonValue>>;
   joinParents?: Record<string, SubmissionId>;
   jobs: Record<string, CronJob>;
   runs: Record<string, CronRun>;
@@ -108,7 +107,7 @@ export const WorkerDoc = defineDoc<{
     taskId: TaskId;
     assignmentId: TaskId<string>;
     text: string;
-    artifacts: AgentTurnArtifacts & Record<string, JsonValue>;
+    presentation: MessagePresentation & Record<string, JsonValue>;
   };
   completion?: {
     owner: TaskId<string>;
@@ -127,6 +126,8 @@ export const WorkerDoc = defineDoc<{
 });
 
 export interface OrchestrationConfig {
+  resolvePresentation?: OrchestrationServices["resolvePresentation"];
+  resolveFileSource?: OrchestrationServices["resolveFileSource"];
   config?: unknown;
   fileStorage?: import("./worker-files").WorkerFileStorage;
   workspaces?:
@@ -177,6 +178,11 @@ export interface RemoteWorkerService {
 }
 
 export interface OrchestrationServices {
+  resolvePresentation(
+    conversationId: ConversationId,
+    selection: AttachmentSelection,
+  ): Promise<MessagePresentation>;
+  resolveFileSource?(ref: string): Promise<{ name: string; path: string }>;
   readonly fileStorage?: import("./worker-files").WorkerFileStorage;
   readonly remoteWorkers?: RemoteWorkerService;
   readonly harness: Harness;

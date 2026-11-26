@@ -68,6 +68,10 @@ export function projectRuntimeNoticeRequest(request: Context): Context {
   return {
     ...request,
     messages: request.messages.map((message) => {
+      if (message.role === "assistant" && "battyPresentation" in message) {
+        const { battyPresentation: _, ...modelMessage } = message;
+        return modelMessage;
+      }
       if (message.role !== "user") return message;
       return {
         ...message,
@@ -86,7 +90,7 @@ export function projectRuntimeNoticeRequest(request: Context): Context {
 export function projectRuntimeNoticeContext(view: ContextView): ContextView {
   const projected = new Map<Message, Message>();
   const project = (message: Message): Message => {
-    if (message.role !== "user") return message;
+    if (message.role !== "user" && message.role !== "assistant") return message;
     let result = projected.get(message);
     if (!result) {
       result = projectRuntimeNoticeRequest({ messages: [message] }).messages[0]!;

@@ -10,7 +10,11 @@ import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { createOrchestration } from "./orchestration.js";
+import { createOrchestration, type OrchestrationConfig } from "./orchestration.js";
+import type { AttachmentSelection } from "./message-presentation";
+
+export const withAttachments = (text: string, selection: AttachmentSelection) =>
+  `${text}\n\n<batty-attachments>${JSON.stringify(selection)}</batty-attachments>`;
 
 export const until = async (check: () => Promise<boolean>) => {
   for (let i = 0; i < 1000; i++) {
@@ -25,6 +29,8 @@ export async function fixture(
   onError: (error: unknown) => void = console.error,
   assistantWorkspaceId?: string,
   networkAvailable?: () => Promise<boolean>,
+  resolvePresentation?: OrchestrationConfig["resolvePresentation"],
+  fileSourceFactory?: (directory: string) => NonNullable<OrchestrationConfig["resolveFileSource"]>,
 ) {
   const directory = await mkdtemp(join(tmpdir(), "batty-orchestration-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
@@ -42,6 +48,8 @@ export async function fixture(
     {
       fileStorage: { rootDir: join(directory, "sent-files") },
       onError,
+      resolvePresentation,
+      resolveFileSource: fileSourceFactory?.(directory),
       workspaces: [
         {
           id: "test",

@@ -1,7 +1,15 @@
-# Response artifacts
+# Artifacts
 
-Files, diffs, sites and live browsers belong to the execution scope that produced them. Subagent and cron reports list stable refs; `attach_artifacts` forwards selected received refs to the current response without rerunning their creation tools.
+The private library lists incoming uploads, imported file snapshots, and local sites. Starred items come first, then newest first. Files are immutable; sites open their current version. Diffs and live browsers stay on messages.
 
-Subagent report cards show explicit attachments: `attach_files`, `sites` sharing, `browser` with `action: "attach"`, and `attach_artifacts`. Cloud browser opens and automatic diffs remain in the worker session and available as artifact refs to the parent; they do not add cards to the report. Cron delivery and ordinary assistant replies retain their own attachment rules.
+Use `import_files` or `sites` with `action: "create"` to get refs. To attach them to a reply, including a cron or worker final, append a blank line followed by:
 
-`browser` with `action: "open", cloud: true` and `action: "attach"` returns a live-browser attachment. Live browsers use `browser:` refs and the existing `sites` transport with a discriminated `SiteAttachmentDescriptor` union: hosted sites have `kind: "site"`; browsers have `kind: "browser"`, required `browserId` and `public: false`. The discriminator is excluded from the ref hash, preserving the identity of otherwise identical descriptors. Immutable stored descriptors are decoded at the read/projection boundary; existing handles and history retain their refs without rewriting runtime data. The immutable descriptor points to the same mutable browser session: forwarding preserves its identity, login and lifetime. It neither creates a browser nor extends the inactivity timeout. Browser controls and streaming still require Batty authentication; forwarding does not publish access. A closed or expired browser stays unavailable through every forwarded attachment.
+```text
+<batty-attachments>{"artifactRefs":["file:<id>","site:<id>"]}</batty-attachments>
+```
+
+For an intermediate report: `subagent({action: "report", prompt: "…", artifactRefs: ["file:<id>"]})`. Either accepts `browserId` for a live browser in the current workspace. Selection does not create a browser or extend its lifetime.
+
+Only selected files cross installations. File refs also work as explicit inputs to a worker assignment.
+
+Existing instances require the [one-time presentation migration](artifact-presentation-migration.md).

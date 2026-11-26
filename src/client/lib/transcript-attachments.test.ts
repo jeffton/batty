@@ -1,298 +1,187 @@
 import { mount } from "@vue/test-utils";
 import { expect, test } from "vite-plus/test";
 import ChatMessage from "../components/ChatMessage.vue";
-import { commentaryAttachments, image, site, video } from "../test/commentary-attachments";
+import { changes, commentaryAttachments, image, site, video } from "../test/commentary-attachments";
 import { buildToolStateLookup, buildTranscriptMessages } from "./transcript";
+import { buildTranscriptDisplayEntries } from "./transcript-display";
 import type { UiMessage } from "@/shared/types";
 
 function transcript(messages: UiMessage[]) {
   return buildTranscriptMessages(messages, buildToolStateLookup(messages, []));
 }
 
-function render(messages: UiMessage[], id = "commentary") {
+function render(messages: UiMessage[], id: string) {
   const entry = transcript(messages).find((entry) => entry.message.id === id)!;
   return mount(ChatMessage, {
     props: entry,
-    global: { stubs: { AgentTurnDiffPopover: true, SharedSitesList: true, ToolCallBlock: true } },
+    global: { stubs: { AgentTurnDiffPopover: true, SharedSitesList: true } },
   });
 }
 
-test("native outputs and explicit forwards attach to commentary once, before final and on replay", () => {
-  for (const messages of [commentaryAttachments().slice(0, 4), commentaryAttachments()]) {
-    const wrapper = render(messages);
-    try {
-      expect(wrapper.findAll("video")).toHaveLength(1);
-      expect(wrapper.findAll(".attached-files__card")).toHaveLength(2);
-      expect(wrapper.text()).not.toContain("Unselected child");
-      expect(wrapper.findAll(".message__segment--bubble")).toHaveLength(1);
-      expect(wrapper.get(".message__segment--bubble").text()).toContain("Here is the timelapse.");
-      expect(wrapper.find(".message__segment--bubble video").exists()).toBe(true);
-      expect(wrapper.findAll("shared-sites-list-stub")).toHaveLength(1);
-      expect(wrapper.findAll(".message__diff-button")).toHaveLength(1);
-      if (messages.length > 4) {
-        const final = render(messages, "final");
-        expect(final.findAll(".message__artifacts")).toHaveLength(0);
-        final.unmount();
-      }
-    } finally {
-      wrapper.unmount();
-    }
+test("attachments appear on their owning commentary and never in the tool result or later reply", () => {
+  const messages = commentaryAttachments();
+  const request = render(messages, "tool-request");
+  const owner = render(messages, "commentary");
+  const final = render(messages, "final");
+  try {
+    expect(request.text()).toContain("Prepared timelapse.");
+    expect(request.text()).not.toContain("Unselected child");
+    expect(request.find(".attached-files__card").exists()).toBe(false);
+    expect(owner.get(".message__segment--bubble").text()).toContain("Here is the timelapse.");
+    expect(owner.find(".message__segment--bubble video").exists()).toBe(true);
+    expect(owner.findAll(".attached-files__card")).toHaveLength(2);
+    expect(owner.findAll("shared-sites-list-stub")).toHaveLength(1);
+    expect(owner.findAll(".message__diff-button")).toHaveLength(1);
+    expect(final.find(".message__attachments").exists()).toBe(false);
+  } finally {
+    request.unmount();
+    owner.unmount();
+    final.unmount();
   }
 });
 
-for (const name of ["attach_files", "sites"] as const) {
-  test(`${name} waits for its result and attaches after, not to preceding request text`, () => {
+test("an orphaned historic tool result retains its text without creating pending attachments", () => {
+  const toolResult: UiMessage = {
+    id: "result",
+    role: "toolResult",
+    timestamp: 1,
+    toolCallId: "import",
+    toolName: "attach_files",
+    isError: false,
+    blocks: [{ type: "text", text: "Imported image" }],
+    details: { sentFiles: [image], sites: [site] },
+  };
+  const messages = [toolResult, commentaryAttachments().at(-1)!];
+  expect(transcript(messages).map(({ message }) => message.id)).toEqual(["result", "final"]);
+  const request = render(messages, "result");
+  const final = render(messages, "final");
+  try {
+    expect(request.text()).toContain("Imported image");
+    expect(request.find(".attached-files__card").exists()).toBe(false);
+    expect(final.find(".message__attachments").exists()).toBe(false);
+  } finally {
+    request.unmount();
+    final.unmount();
+  }
+});
+
+test.each(["error", "aborted"] as const)(
+  "a resumed %s keeps selected attachments on the interrupted reply",
+  (stopReason) => {
     const messages: UiMessage[] = [
       {
-        id: "request",
+        id: "interrupted",
         role: "assistant",
         timestamp: 1,
         turnPhase: "intermediate",
-        blocks: [
-          { type: "text", text: "Preparing" },
-          { type: "toolCall", id: "attach", name, arguments: {} },
-        ],
-      },
-      {
-        id: "result",
-        role: "toolResult",
-        timestamp: 2,
-        toolCallId: "attach",
-        toolName: name,
-        isError: false,
+        runTaskId: "task",
+        stopReason,
         blocks: [],
-        details: {
-          sentFiles: name === "attach_files" ? [video] : [],
-          sites: name === "sites" ? [site] : [],
-        },
+        sentFiles: [image],
       },
       {
-        id: "commentary",
+        id: "resumed",
         role: "assistant",
-        timestamp: 3,
-        turnPhase: "intermediate",
-        blocks: [
-          { type: "image", mimeType: image.mimeType, url: image.previewUrl, name: "Reply image" },
-        ],
-        sentFiles: name === "attach_files" ? [video] : [],
-        sites: name === "sites" ? [site] : [],
+        timestamp: 2,
+        turnPhase: "final",
+        runTaskId: "task",
+        stopReason: "stop",
+        blocks: [{ type: "text", text: "Done" }],
       },
     ];
-    const entries = transcript(messages);
-    expect(entries.find((entry) => entry.message.id === "request")!.message).toMatchObject({
-      blocks: [{ type: "text", text: "Preparing" }],
-    });
-    const reply = entries.find((entry) => entry.message.id === "commentary")!;
-    expect(reply.toolStatesByCallId.get("attach")?.resultDetails).toEqual(
-      messages[1]!.role === "toolResult" ? messages[1]!.details : undefined,
-    );
-    const wrapper = render(messages);
-    expect(wrapper.findAll("video")).toHaveLength(name === "attach_files" ? 1 : 0);
-    expect(wrapper.findAll("shared-sites-list-stub")).toHaveLength(name === "sites" ? 1 : 0);
-    wrapper.unmount();
-  });
-}
+    const display = buildTranscriptDisplayEntries(transcript(messages)).entries;
+    expect(display).toMatchObject([
+      { entry: { message: { id: "interrupted", sentFiles: [image] } } },
+      { entry: { message: { id: "resumed" } } },
+    ]);
+    const resumed = display.at(-1);
+    expect(resumed?.kind === "message" && resumed.entry.message).not.toHaveProperty("sentFiles");
+  },
+);
 
-test("successful native effects survive an outer codemode error, without forwarding child reports", () => {
-  const messages = commentaryAttachments();
-  (messages[2] as Extract<UiMessage, { role: "toolResult" }>).isError = true;
-  const wrapper = render(messages);
-  expect(wrapper.findAll("video")).toHaveLength(1);
-  expect(wrapper.text()).not.toContain("Unselected child");
-  wrapper.unmount();
-});
-
-test("received worker reports are not attachment carriers", () => {
-  const messages = commentaryAttachments();
-  messages[2] = {
-    ...(messages[2] as Extract<UiMessage, { role: "toolResult" }>),
-    toolName: "subagent",
-  };
-  const commentary = messages[3] as Extract<UiMessage, { role: "assistant" }>;
-  delete commentary.sentFiles;
-  delete commentary.sites;
-  delete commentary.fileChanges;
-  expect(
-    transcript(messages).find((entry) => entry.message.id === "commentary")?.toolStatesByCallId
-      .size,
-  ).toBe(1);
-  const wrapper = render(messages);
-  expect(wrapper.findAll(".message__artifacts")).toHaveLength(0);
-  wrapper.unmount();
-});
-
-test("failed direct attachment calls remain visible errors and do not become carriers", () => {
-  const messages: UiMessage[] = [
-    {
-      id: "request",
-      role: "assistant",
-      timestamp: 1,
-      turnPhase: "intermediate",
-      blocks: [{ type: "toolCall", id: "failed", name: "attach_files", arguments: {} }],
-    },
-    {
-      id: "failure",
-      role: "toolResult",
-      timestamp: 2,
-      toolCallId: "failed",
-      toolName: "attach_files",
-      isError: true,
-      blocks: [{ type: "text", text: "Import failed" }],
-      details: { sentFiles: [video] },
-    },
-    {
-      id: "commentary",
-      role: "assistant",
-      timestamp: 3,
-      turnPhase: "intermediate",
-      blocks: [{ type: "text", text: "Could not import" }],
-    },
-  ];
-  expect(transcript(messages)[0]!.toolStatesByCallId.get("failed")).toMatchObject({
-    status: "error",
-    resultBlocks: [{ type: "text", text: "Import failed" }],
-  });
-  expect(
-    transcript(messages).find((entry) => entry.message.id === "commentary")!.toolStatesByCallId
-      .size,
-  ).toBe(0);
-});
-
-test("site-only native codemode output is an attachment, not a synthetic tool bubble", () => {
-  const messages = commentaryAttachments();
-  const result = messages[2] as Extract<UiMessage, { role: "toolResult" }>;
-  result.details = {
-    sites: [site],
-    calls: [{ id: "site", name: "sites", args: "{}", status: "ok", sites: [site] }],
-  };
-  const commentary = messages[3] as Extract<UiMessage, { role: "assistant" }>;
-  delete commentary.sentFiles;
-  delete commentary.fileChanges;
-  const wrapper = render(messages);
-  expect(wrapper.findAll("shared-sites-list-stub")).toHaveLength(1);
-  expect(wrapper.findAll("tool-call-block-stub")).toHaveLength(1); // real await, not synthetic carrier
-  expect(wrapper.findAll(".attached-files__card")).toHaveLength(0);
-  wrapper.unmount();
-});
-
-const interleavings: Array<[string, UiMessage[]]> = [
-  [
-    "worker notice",
-    [
-      {
-        id: "notice",
-        role: "custom",
-        timestamp: 3,
-        customType: "batty-runtime-notice:subagent",
-        text: "Another worker completed",
-      },
-    ],
-  ],
-  [
-    "user steer",
-    [
-      {
-        id: "steer",
-        role: "user",
-        timestamp: 3,
-        blocks: [{ type: "text", text: "Continue the other task too" }],
-      },
-    ],
-  ],
-  [
-    "unreferenced tool result",
-    [
-      {
-        id: "orphan-result",
-        role: "toolResult",
-        timestamp: 3,
-        toolCallId: "orphan",
-        toolName: "read",
-        isError: false,
-        blocks: [{ type: "text", text: "Other tool output" }],
-      },
-    ],
-  ],
-  [
-    "referenced tool result",
-    [
-      {
-        id: "read-call",
-        role: "assistant",
-        timestamp: 3,
-        turnPhase: "intermediate",
-        blocks: [{ type: "toolCall", id: "read", name: "read", arguments: {} }],
-      },
-      {
-        id: "read-result",
-        role: "toolResult",
-        timestamp: 3,
-        toolCallId: "read",
-        toolName: "read",
-        isError: false,
-        blocks: [{ type: "text", text: "Read output" }],
-      },
-    ],
-  ],
-  [
-    "direct cron delivery",
-    [
-      {
-        id: "direct",
-        role: "assistant",
-        timestamp: 3,
-        turnPhase: "final",
-        directDelivery: { sessionId: "cron", runId: "cron-run" },
-        blocks: [{ type: "text", text: "Independent reminder" }],
-      },
-    ],
-  ],
-];
-
-for (const [label, interleaved] of interleavings) {
-  test(`${label} neither flushes nor consumes native output before its owning commentary`, () => {
-    const messages = commentaryAttachments();
-    messages.splice(3, 0, ...interleaved);
-    const entries = transcript(messages);
-    expect(entries.some((entry) => entry.message.id.endsWith(":attachments"))).toBe(false);
-    const wrappers = entries.map((entry) =>
-      mount(ChatMessage, {
-        props: entry,
-        global: {
-          stubs: { AgentTurnDiffPopover: true, SharedSitesList: true, ToolCallBlock: true },
+test.each(["subagent", "codemode"] as const)(
+  "only a completed await shows its selected attachments within the %s report",
+  (toolName) => {
+    const presentation = { sentFiles: [video], sites: [site], fileChanges: changes };
+    const messages = (["inspect", "failed", "await"] as const).flatMap<UiMessage>((id) => {
+      const action = id === "inspect" ? "inspect" : "await";
+      const failed = id === "failed";
+      return [
+        {
+          id,
+          role: "assistant",
+          timestamp: 1,
+          turnPhase: "intermediate",
+          blocks: [{ type: "toolCall", name: toolName, id, arguments: { action } }],
         },
-      }),
-    );
-    expect(wrappers.reduce((count, wrapper) => count + wrapper.findAll("video").length, 0)).toBe(1);
-    for (const wrapper of wrappers) wrapper.unmount();
-    const owner = render(messages);
-    expect(owner.findAll(".attached-files__card")).toHaveLength(2);
-    owner.unmount();
-  });
-}
+        {
+          id: `${id}-result`,
+          role: "toolResult",
+          timestamp: 2,
+          toolName,
+          toolCallId: id,
+          isError: failed,
+          blocks: [{ type: "text", text: "Worker result" }],
+          details:
+            toolName === "subagent"
+              ? { presentation }
+              : {
+                  calls: [
+                    {
+                      id,
+                      name: "subagent",
+                      args: JSON.stringify({ action }),
+                      status: failed ? "error" : "ok",
+                      presentation,
+                    },
+                  ],
+                },
+        },
+      ];
+    });
+    messages.push(commentaryAttachments().at(-1)!);
+    const inspect = render(messages, "inspect");
+    const failed = render(messages, "failed");
+    const awaitReport = render(messages, "await");
+    const final = render(messages, "final");
+    try {
+      expect(inspect.find(".tool-report-attachments").exists()).toBe(false);
+      expect(failed.find(".tool-report-attachments").exists()).toBe(false);
+      const report = awaitReport.get(".tool-report-attachments");
+      expect(report.get(".attached-files__card").text()).toContain("Timelapse.mp4");
+      expect(report.find("shared-sites-list-stub").exists()).toBe(true);
+      expect(report.get("button").text()).toContain("View changes 1");
+      expect(final.find("video").exists()).toBe(false);
+    } finally {
+      inspect.unmount();
+      failed.unmount();
+      awaitReport.unmount();
+      final.unmount();
+    }
+  },
+);
 
-test("native output stays visible at the end while waiting for the next owning response", () => {
-  const messages = commentaryAttachments().slice(0, 3);
-  messages.push(...interleavings[0]![1], ...interleavings[1]![1]);
-  const entries = transcript(messages);
-  expect(entries.at(-1)!.message.id).toBe("tool-result:attachments");
-  const pending = render(messages, "tool-result:attachments");
-  expect(pending.findAll(".attached-files__card")).toHaveLength(2);
-  pending.unmount();
-});
-
-test("empty commentary does not consume a pending native attachment", () => {
-  const messages = commentaryAttachments();
-  messages.splice(3, 0, {
-    id: "empty",
-    role: "assistant",
-    timestamp: 3,
-    turnPhase: "intermediate",
-    blocks: [{ type: "text", text: " \n " }],
-  });
-  const entries = transcript(messages);
-  expect(entries.find((entry) => entry.message.id === "empty")!.toolStatesByCallId.size).toBe(0);
-  const wrapper = render(messages);
-  expect(wrapper.findAll(".attached-files__card")).toHaveLength(2);
-  wrapper.unmount();
+test("a runtime report renders its message presentation, not descriptors from another report", () => {
+  const notice: UiMessage = {
+    id: "notice",
+    role: "custom",
+    timestamp: 1,
+    customType: "batty-runtime-notice:subagent",
+    text: "Worker result",
+    data: {
+      runtimePresentation: { sentFiles: [video], sites: [site], fileChanges: changes },
+    },
+  };
+  const messages = [notice, { ...notice, id: "unrelated", data: {} }];
+  const report = render(messages, "notice");
+  const unrelated = render(messages, "unrelated");
+  try {
+    expect(report.find("video").exists()).toBe(true);
+    expect(report.find("shared-sites-list-stub").exists()).toBe(true);
+    expect(report.find(".message__diff-button").exists()).toBe(true);
+    expect(unrelated.find(".message__attachments").exists()).toBe(false);
+  } finally {
+    report.unmount();
+    unrelated.unmount();
+  }
 });

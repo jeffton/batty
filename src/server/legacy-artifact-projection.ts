@@ -1,23 +1,131 @@
+import { createHash } from "node:crypto";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import { generateUnifiedPatch } from "@earendil-works/pi-coding-agent";
-import type { AgentTurnArtifacts, DurableFileChange } from "./agent-turn-file-changes";
+import type { DurableFileChange } from "./agent-turn-file-changes";
+import type { MessagePresentation as AgentTurnArtifacts } from "./message-presentation";
 import type { SentFileDescriptor, SiteAttachmentDescriptor } from "@/shared/types";
-import { artifactRefs, mergeResponseArtifacts, responseArtifacts } from "./artifact-forwarding";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { decodeSiteAttachmentDescriptor } from "./site-attachments";
 
-export type RuntimeResultArtifacts = AgentTurnArtifacts & {
+function artifactRefs(artifacts: AgentTurnArtifacts = {}) {
+  return [
+    ...(artifacts.sentFiles ?? []).map((file) => ({ kind: "file" as const, value: file })),
+    ...(artifacts.fileChanges ?? []).map((diff) => ({ kind: "diff" as const, value: diff })),
+    ...(artifacts.sites ?? []).map(decodeSiteAttachmentDescriptor).map((site) => ({
+      kind: site.kind,
+      value: site,
+    })),
+  ].map((item) => ({
+    ...item,
+    // A discriminator does not create a new version of an existing attachment.
+    ref: `${item.kind}:${createHash("sha256")
+      .update(
+        JSON.stringify(
+          item.kind === "site" || item.kind === "browser"
+            ? Object.fromEntries(Object.entries(item.value).filter(([key]) => key !== "kind"))
+            : item.value,
+        ),
+      )
+      .digest("hex")}`,
+  }));
+}
+
+type ArtifactReferences = AgentTurnArtifacts & { referencedArtifacts?: AgentTurnArtifacts };
+type ArtifactToolResult = ArtifactReferences & {
+  action?: string;
+  forwardedArtifacts?: AgentTurnArtifacts;
+};
+type ArtifactDetails = ArtifactToolResult & {
+  calls?: Array<ArtifactToolResult & { name?: string; details?: ArtifactToolResult }>;
+};
+
+export function mergeResponseArtifacts(...sources: AgentTurnArtifacts[]): AgentTurnArtifacts {
+  const unique = new Map(
+    sources.flatMap((source) => artifactRefs(source)).map((item) => [item.ref, item]),
+  );
+  const items = [...unique.values()];
+  const fileChanges = items.flatMap((item) => (item.kind === "diff" ? [item.value] : []));
+  const sites = items.flatMap((item) =>
+    item.kind === "site" || item.kind === "browser" ? [item.value] : [],
+  );
+  const sentFiles = items.flatMap((item) => (item.kind === "file" ? [item.value] : []));
+  return {
+    ...(fileChanges.length ? { fileChanges } : {}),
+    ...(sites.length ? { sites } : {}),
+    ...(sentFiles.length ? { sentFiles } : {}),
+  };
+}
+
+function forwardedResponseArtifacts(
+  messages: readonly NonNullable<EntryRecord["model"]>[number][],
+): AgentTurnArtifacts[] {
+  const sources: AgentTurnArtifacts[] = [];
+  for (const message of messages) {
+    if (message.role !== "toolResult") continue;
+    const details = message.details as ArtifactDetails | undefined;
+    if (details?.forwardedArtifacts) sources.push(details.forwardedArtifacts);
+    if (message.toolName === "codemode") {
+      for (const call of details?.calls ?? []) {
+        const forwarded = (call.details ?? call).forwardedArtifacts;
+        if (forwarded) sources.push(forwarded);
+      }
+    }
+  }
+  return sources;
+}
+
+export function legacyNativeCarrier(
+  message: NonNullable<EntryRecord["model"]>[number],
+): AgentTurnArtifacts | undefined {
+  if (message.role !== "toolResult") return;
+  const details = message.details as ArtifactDetails | undefined;
+  if (message.toolName === "codemode") {
+    const native =
+      details?.calls?.filter(({ name }) => name === "attach_files" || name === "sites") ?? [];
+    const sentFiles = native.flatMap((call) => call.sentFiles ?? []);
+    const sites = native.flatMap((call) => call.sites ?? []);
+    if (sentFiles.length || sites.length) return { sentFiles, sites };
+  }
+  if (message.isError) return;
+  if (message.toolName === "attach_files" && details?.sentFiles?.length)
+    return { sentFiles: details.sentFiles };
+  if (message.toolName === "sites" && details?.sites?.length) return { sites: details.sites };
+}
+
+export function legacyReplySources(messages: readonly NonNullable<EntryRecord["model"]>[number][]) {
+  const owned = messages.flatMap((message) => {
+    if (message.role !== "toolResult" || (message.isError && message.toolName !== "codemode"))
+      return [];
+    const details = message.details as ArtifactDetails | undefined;
+    const owned =
+      message.toolName === "codemode"
+        ? (details?.calls ?? []).map((call) => ({
+            name: call.name,
+            artifacts: call.details ?? call,
+          }))
+        : [{ name: message.toolName, artifacts: details }];
+    return owned.flatMap(({ name, artifacts }): AgentTurnArtifacts[] => {
+      if (name === "attach_files" || name === "sites")
+        return [{ sentFiles: artifacts?.sentFiles, sites: artifacts?.sites }];
+      if (name === "browser")
+        return [
+          {
+            sites: (artifacts?.sites ?? [])
+              .map(decodeSiteAttachmentDescriptor)
+              .filter((site) => site.kind === "browser"),
+          },
+        ];
+      return [];
+    });
+  });
+  return { forwarded: forwardedResponseArtifacts(messages), owned };
+}
+
+type RuntimeResultArtifacts = AgentTurnArtifacts & {
   battyFileChanges?: DurableFileChange[];
   forwardedArtifacts?: AgentTurnArtifacts;
   reportAttachments?: AgentTurnArtifacts;
 };
-
-export function subagentReportArtifacts(entries: readonly EntryRecord[]): RuntimeResultArtifacts {
-  return {
-    ...runtimeResultArtifacts(entries),
-    reportAttachments: responseArtifacts(entries, { explicitOnly: true }),
-  };
-}
 
 type HistoricalCodemodeCall = {
   name?: string;
@@ -37,7 +145,9 @@ function isHistoricalInspection(call: HistoricalCodemodeCall): boolean {
 }
 
 /** Only the assignment's own effects and child deliveries contribute report artifacts. */
-export function runtimeResultArtifacts(entries: readonly EntryRecord[]): RuntimeResultArtifacts {
+export function legacyRuntimeResultArtifacts(
+  entries: readonly EntryRecord[],
+): RuntimeResultArtifacts {
   const files = new Map<string, SentFileDescriptor>();
   const sites = new Map<string, SiteAttachmentDescriptor>();
   const changes = new Map<string, DurableFileChange>();

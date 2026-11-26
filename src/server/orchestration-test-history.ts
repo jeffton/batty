@@ -31,7 +31,6 @@ export async function orchestrationHistory(harness: Harness) {
     const record = await harness.snapshot(DeliveryRecord, String(task.id as TaskId), context);
     if (record?.call) state.calls[String(task.id)] = record.call;
     if (record?.join) (state.joins ??= {})[String(task.id)] = record.join;
-    if (record?.artifacts) (state.resultArtifacts ??= {})[String(task.id)] = record.artifacts;
   }
   return state;
 }

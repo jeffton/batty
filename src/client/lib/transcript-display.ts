@@ -1,7 +1,6 @@
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import { easyModeMessage } from "@/client/lib/easy-mode";
-import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
-import type { ToolDisplayState, TranscriptMessageView } from "@/client/lib/transcript";
+import { hasMessageAttachments, type TranscriptMessageView } from "@/client/lib/transcript";
 import {
   hasNoReplyText,
   isTranscriptDetailsBlock,
@@ -32,10 +31,7 @@ interface TranscriptSection {
   independent?: boolean;
 }
 
-function transcriptSections(
-  entries: TranscriptMessageView[],
-  toolStatesByCallId: Map<string, ToolDisplayState>,
-): TranscriptSection[] {
+function transcriptSections(entries: TranscriptMessageView[]): TranscriptSection[] {
   const sections: TranscriptSection[] = [];
   let current: TranscriptSection | undefined;
   let hasReply = false;
@@ -58,21 +54,18 @@ function transcriptSections(
       hasReply = false;
     }
     current.indices.push(index);
-    if (hasAssistantReply(collapsedMessage(entry, toolStatesByCallId))) hasReply = true;
+    if (hasAssistantReply(collapsedMessage(entry))) hasReply = true;
   });
   return sections;
 }
 
-function collapsedMessage(
-  entry: TranscriptMessageView,
-  toolStatesByCallId: Map<string, ToolDisplayState>,
-): TranscriptMessageView | undefined {
+function collapsedMessage(entry: TranscriptMessageView): TranscriptMessageView | undefined {
   const original = entry.message;
   const source =
     original.role === "assistant" && hasNoReplyText(original.blocks)
       ? { ...original, blocks: original.blocks.filter((block) => block.type !== "text") }
       : original;
-  const message = easyModeMessage(source, toolStatesByCallId);
+  const message = easyModeMessage(source);
   return message ? { ...entry, message } : undefined;
 }
 
@@ -134,17 +127,7 @@ function hasAssistantReply(entry: TranscriptMessageView | undefined): boolean {
   if (
     entry.message.stopReason === "error" ||
     entry.message.errorMessage?.trim() ||
-    (entry.message.fileChanges?.length ?? 0) > 0 ||
-    (entry.message.sentFiles?.length ?? 0) > 0 ||
-    (entry.message.sites?.length ?? 0) > 0
-  ) {
-    return true;
-  }
-
-  if (
-    entry.message.blocks.some((block) =>
-      isAttachmentOutputToolCall(block, entry.toolStatesByCallId),
-    )
+    hasMessageAttachments(entry.message)
   ) {
     return true;
   }
@@ -158,7 +141,6 @@ function hasAssistantReply(entry: TranscriptMessageView | undefined): boolean {
 
 export function buildTranscriptDisplayEntries(
   entries: TranscriptMessageView[],
-  toolStatesByCallId: Map<string, ToolDisplayState>,
   options: {
     alwaysShowDetails?: boolean;
     openDetailsSectionKey?: string | null;
@@ -194,7 +176,7 @@ export function buildTranscriptDisplayEntries(
     };
   }
 
-  const sections = transcriptSections(entries, toolStatesByCallId);
+  const sections = transcriptSections(entries);
   const latestSectionKey = options.isStreaming
     ? sections.findLast((section) => !section.independent)?.key
     : undefined;
@@ -214,6 +196,7 @@ export function buildTranscriptDisplayEntries(
           message.role !== "assistant" ||
           message.stopReason !== "aborted" ||
           message.errorMessage ||
+          hasMessageAttachments(message) ||
           !message.runTaskId
         )
           return [];
@@ -231,9 +214,7 @@ export function buildTranscriptDisplayEntries(
       }),
     );
     const collapsedEntries = sectionEntries.map((entry) =>
-      resumedAbortIds.has(entry.message.id)
-        ? undefined
-        : collapsedMessage(entry, toolStatesByCallId),
+      resumedAbortIds.has(entry.message.id) ? undefined : collapsedMessage(entry),
     );
     const lastReplyIndex = collapsedEntries.findLastIndex(hasAssistantReply);
     const isExpanded = isRunning || section.key === options.openDetailsSectionKey;

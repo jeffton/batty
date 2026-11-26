@@ -1,8 +1,7 @@
 import { expectTypeOf, test } from "vite-plus/test";
 import type { RemoteWorkers } from "../server/remote-workers";
 import type { RemoteConnectionCredentials } from "../server/remote-access";
-import type { NodeOutputs, NodeWorkerSummary } from "./node-api";
-import type { ServerEvent } from "./types";
+import type { NodeOutputs, NodeSessionEvent, NodeWorkerSummary } from "./node-api";
 
 // Checked by tsc, never sent to a live connection.
 async function nodeContract(
@@ -17,7 +16,7 @@ async function nodeContract(
     ReadableStream<{ workers: NodeWorkerSummary[] }> | undefined
   >();
   const session = await request(connection, "node.session.watch", { sessionId: "1" });
-  expectTypeOf(session.events).toEqualTypeOf<ReadableStream<ServerEvent> | undefined>();
+  expectTypeOf(session.events).toEqualTypeOf<ReadableStream<NodeSessionEvent> | undefined>();
   // @ts-expect-error Peer connections cannot call owner operations.
   await request(connection, "remotes.token.generate", {});
   // @ts-expect-error Session input must contain its session ID.

@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
 import { expect, test as serialTest, vi } from "vite-plus/test";
-import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
+import { fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
+import type { Context as ModelContext } from "@earendil-works/pi-ai";
 import { loadConfig } from "./config";
 import { Runtime, context } from "./runtime";
 import type { RemoteWorkers } from "./remote-workers";
@@ -369,7 +370,30 @@ function filesIn(value: unknown): SentFileDescriptor[] {
   return Object.values(object).flatMap(filesIn);
 }
 
+function importedRef(request: ModelContext, name: string) {
+  const imports = request.messages.filter(
+    (message): message is Extract<typeof message, { role: "toolResult" }> =>
+      message.role === "toolResult" && message.toolName === "import_files",
+  );
+  for (const message of imports.toReversed())
+    for (const block of message.content)
+      if (block.type === "text")
+        for (const match of block.text.matchAll(/\{"ref":"file:[^"]+","name":"[^"]+"\}/g)) {
+          const item = JSON.parse(match[0]) as { ref: string; name: string };
+          if (item.name === name) return item.ref;
+        }
+  throw new Error(`Missing import_files ref for ${name}`);
+}
+
+function withSelectedFiles(text: string, ...refs: string[]) {
+  return fauxText(
+    `${text}\n\n<batty-attachments>${JSON.stringify({ artifactRefs: refs })}</batty-attachments>`,
+  );
+}
+
 export {
+  importedRef,
+  withSelectedFiles,
   test,
   storageRoot,
   nodeRequest,

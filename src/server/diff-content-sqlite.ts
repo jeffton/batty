@@ -4,30 +4,30 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { SqliteExecutor, SqliteValue } from "@earendil-works/pi-durable/storage/sqlite";
 import { NodeSqliteDatabase } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { artifactKeys, rewriteArtifactRow } from "./artifact-row-codec";
+import { diffContentKeys, rewriteDiffContentRow } from "./diff-content-row-codec";
 
-export const artifactColumns = [
-  { table: "entries", column: "record" },
+export const diffContentColumns = [
+  { table: "entries", column: "record", updates: true },
   { table: "tasks", column: "record", updates: true },
   { table: "document_revisions", column: "content", delta: true },
 ] as const;
 
-type ArtifactTable = (typeof artifactColumns)[number]["table"];
+type DiffContentTable = (typeof diffContentColumns)[number]["table"];
 
-export function artifactIdentity(table: ArtifactTable, qualifier = "") {
+export function diffContentIdentity(table: DiffContentTable, qualifier = "") {
   return table === "document_revisions"
     ? `${qualifier}document_id || ':' || ${qualifier}seq`
     : `CAST(${qualifier}id AS TEXT)`;
 }
 
-export const artifactCandidates = (column: string) =>
-  `(${artifactKeys.map((key) => `instr(${column}, '${key}') > 0`).join(" OR ")})`;
+export const diffContentCandidates = (column: string) =>
+  `(${diffContentKeys.map((key) => `instr(${column}, '${key}') > 0`).join(" OR ")})`;
 
-export function artifactDigest(body: string) {
+export function diffContentDigest(body: string) {
   return createHash("sha256").update(body).digest("base64url");
 }
 
-export function createArtifactStore(db: DatabaseSync, initialize: boolean) {
+export function createDiffContentStore(db: DatabaseSync, initialize: boolean) {
   if (initialize) {
     db.exec(`CREATE TABLE IF NOT EXISTS batty_artifact_text_v1 (
       digest TEXT PRIMARY KEY NOT NULL,
@@ -61,7 +61,7 @@ export function createArtifactStore(db: DatabaseSync, initialize: boolean) {
     ON CONFLICT(owner, identity) DO UPDATE SET digest=excluded.digest`);
   const forget = db.prepare("DELETE FROM batty_artifact_rows_v1 WHERE owner=? AND identity=?");
   const isPacked = (table: string, key: string, raw: string) =>
-    raw.includes(prefix) && registered.get(table, key)?.digest === artifactDigest(raw);
+    raw.includes(prefix) && registered.get(table, key)?.digest === diffContentDigest(raw);
   return {
     prefix,
     isPacked,
@@ -77,7 +77,7 @@ export function createArtifactStore(db: DatabaseSync, initialize: boolean) {
         return raw;
       }
       const seen = new Set<string>();
-      const packed = rewriteArtifactRow(
+      const packed = rewriteDiffContentRow(
         raw,
         (value) => {
           // An object in a fresh write is data, never a reference. If shaped like
@@ -86,7 +86,7 @@ export function createArtifactStore(db: DatabaseSync, initialize: boolean) {
           if (typeof value !== "string" && !escape) return value;
           const body = JSON.stringify(value);
           if (!escape && Buffer.byteLength(body) <= prefix.length + 50) return value;
-          const digest = artifactDigest(body);
+          const digest = diffContentDigest(body);
           if (!seen.has(digest)) {
             seen.add(digest);
             insert.run(digest, body);
@@ -95,17 +95,17 @@ export function createArtifactStore(db: DatabaseSync, initialize: boolean) {
         },
         delta,
       );
-      if (packed !== raw) register.run(table, key, artifactDigest(packed));
+      if (packed !== raw) register.run(table, key, diffContentDigest(packed));
       else forget.run(table, key);
       return packed;
     },
     unpack(raw: string, delta: boolean, fingerprint: unknown) {
       if (typeof fingerprint !== "string") return raw;
-      if (artifactDigest(raw) !== fingerprint) {
-        throw new Error("Batty artifact row does not match its storage fingerprint");
+      if (diffContentDigest(raw) !== fingerprint) {
+        throw new Error("Batty diff-content row does not match its storage fingerprint");
       }
       const decoded = new Map<string, unknown>();
-      return rewriteArtifactRow(
+      return rewriteDiffContentRow(
         raw,
         (value) => {
           if (!value || typeof value !== "object" || Object.keys(value).length !== 1) return value;
@@ -114,8 +114,8 @@ export function createArtifactStore(db: DatabaseSync, initialize: boolean) {
           let body = decoded.get(digest);
           if (body === undefined) {
             const saved = read.get(digest);
-            if (typeof saved?.body !== "string" || artifactDigest(saved.body) !== digest) {
-              throw new Error(`Missing or corrupt Batty artifact content: ${digest}`);
+            if (typeof saved?.body !== "string" || diffContentDigest(saved.body) !== digest) {
+              throw new Error(`Missing or corrupt Batty diff content: ${digest}`);
             }
             body = JSON.parse(saved.body);
             decoded.set(digest, body);
@@ -128,20 +128,20 @@ export function createArtifactStore(db: DatabaseSync, initialize: boolean) {
   };
 }
 
-function artifactProjection(table: ArtifactTable, qualifier: string) {
-  return `'${table}' AS __artifact_table, (SELECT digest FROM batty_artifact_rows_v1
-    WHERE owner='${table}' AND identity=${artifactIdentity(table, qualifier)}) AS __artifact_digest`;
+function diffContentProjection(table: DiffContentTable, qualifier: string) {
+  return `'${table}' AS __diff_content_table, (SELECT digest FROM batty_artifact_rows_v1
+    WHERE owner='${table}' AND identity=${diffContentIdentity(table, qualifier)}) AS __diff_content_digest`;
 }
 
 // Pi 1.6 and Batty's history index project the complete JSON columns with these
 // SELECT shapes. Add the durable row identity without replacing indexed predicates.
 // Partial JSON projections (counts, usage, ownership) don't read artifact leaves.
-function artifactRead(sql: string) {
+function diffContentRead(sql: string) {
   const revision = /^\s*SELECT seq, kind, version, content FROM document_revisions\b/i.exec(sql);
   if (revision) {
     return sql.replace(
       /\bcontent FROM/i,
-      `content, ${artifactProjection("document_revisions", "document_revisions.")} FROM`,
+      `content, ${diffContentProjection("document_revisions", "document_revisions.")} FROM`,
     );
   }
   const record =
@@ -153,39 +153,40 @@ function artifactRead(sql: string) {
   const table = record[2] === "tasks" ? "tasks" : "entries";
   return sql.replace(
     /\brecord(?=, commit_seq| FROM)/i,
-    `record, ${artifactProjection(table, qualifier || `${table}.`)}`,
+    `record, ${diffContentProjection(table, qualifier || `${table}.`)}`,
   );
 }
 
-class ArtifactSqliteDatabase extends NodeSqliteDatabase {
+class DiffContentSqliteDatabase extends NodeSqliteDatabase {
   constructor(
     db: DatabaseSync,
-    private readonly store: ReturnType<typeof createArtifactStore>,
+    private readonly store: ReturnType<typeof createDiffContentStore>,
+    mode: "read-only" | "read-write",
   ) {
-    super(db);
+    super(db, mode);
   }
 
-  enableArtifactWrites() {
-    this.database.function("batty_pack_artifacts", (table, key, raw, delta, enabled) =>
+  enableDiffContentWrites() {
+    this.database.function("batty_pack_diff_content", (table, key, raw, delta, enabled) =>
       this.store.pack(table as string, key as string, raw as string, delta === 1, enabled === 1),
     );
-    this.database.exec("CREATE TEMP TABLE batty_artifact_pack_guard (active INTEGER)");
-    for (const spec of artifactColumns) {
+    this.database.exec("CREATE TEMP TABLE batty_diff_content_pack_guard (active INTEGER)");
+    for (const spec of diffContentColumns) {
       const { table, column } = spec;
-      const key = artifactIdentity(table, "new.");
+      const key = diffContentIdentity(table, "new.");
       const delta = "delta" in spec ? "new.kind = 'delta'" : "0";
       for (const event of "updates" in spec ? ["INSERT", `UPDATE OF ${column}`] : ["INSERT"]) {
         this.database.exec(`CREATE TEMP TRIGGER batty_pack_${table}_${event.split(" ")[0]}
           AFTER ${event} ON main.${table}
-          WHEN NOT EXISTS (SELECT 1 FROM batty_artifact_pack_guard)
-            AND (${artifactCandidates(`new.${column}`)} OR EXISTS (
+          WHEN NOT EXISTS (SELECT 1 FROM batty_diff_content_pack_guard)
+            AND (${diffContentCandidates(`new.${column}`)} OR EXISTS (
               SELECT 1 FROM batty_artifact_rows_v1 WHERE owner='${table}' AND identity=${key}))
           BEGIN
-            INSERT INTO batty_artifact_pack_guard VALUES (1);
-            UPDATE ${table} SET ${column}=batty_pack_artifacts('${table}', ${key}, new.${column}, ${delta},
+            INSERT INTO batty_diff_content_pack_guard VALUES (1);
+            UPDATE ${table} SET ${column}=batty_pack_diff_content('${table}', ${key}, new.${column}, ${delta},
               (SELECT writes_enabled FROM batty_artifact_encoding_v1 WHERE id=1))
               WHERE rowid=new.rowid;
-            DELETE FROM batty_artifact_pack_guard;
+            DELETE FROM batty_diff_content_pack_guard;
           END;`);
       }
     }
@@ -193,11 +194,11 @@ class ArtifactSqliteDatabase extends NodeSqliteDatabase {
 
   private hydrate<T extends object>(row: T): T {
     const fields = row as Record<string, unknown>;
-    const table = fields.__artifact_table;
+    const table = fields.__diff_content_table;
     if (typeof table !== "string") return row;
-    const digest = fields.__artifact_digest;
-    delete fields.__artifact_table;
-    delete fields.__artifact_digest;
+    const digest = fields.__diff_content_digest;
+    delete fields.__diff_content_table;
+    delete fields.__diff_content_digest;
     if (table === "document_revisions") {
       fields.content = this.store.unpack(fields.content as string, fields.kind === "delta", digest);
     } else {
@@ -207,11 +208,11 @@ class ArtifactSqliteDatabase extends NodeSqliteDatabase {
   }
 
   override get<T extends object>(sql: string, ...params: SqliteValue[]) {
-    return super.get<T>(artifactRead(sql), ...params);
+    return super.get<T>(diffContentRead(sql), ...params);
   }
 
   override all<T extends object>(sql: string, ...params: SqliteValue[]) {
-    return super.all<T>(artifactRead(sql), ...params);
+    return super.all<T>(diffContentRead(sql), ...params);
   }
 
   protected override runOperation<T>(operation: () => T): Promise<T> {
@@ -233,22 +234,27 @@ class ArtifactSqliteDatabase extends NodeSqliteDatabase {
         run: tx.run.bind(tx),
         runCounted: tx.runCounted.bind(tx),
         get: async <R extends object>(sql: string, ...params: SqliteValue[]) => {
-          const row = await tx.get<R>(artifactRead(sql), ...params);
+          const row = await tx.get<R>(diffContentRead(sql), ...params);
           return row && this.hydrate(row);
         },
         all: async <R extends object>(sql: string, ...params: SqliteValue[]) =>
-          (await tx.all<R>(artifactRead(sql), ...params)).map((row) => this.hydrate(row)),
+          (await tx.all<R>(diffContentRead(sql), ...params)).map((row) => this.hydrate(row)),
       }),
     );
   }
 }
 
-export async function openArtifactSqliteDatabase(path: string) {
-  if (path !== ":memory:") await mkdir(dirname(path), { recursive: true });
-  const db = new DatabaseSync(path, { timeout: 5_000 });
+export async function openDiffContentSqliteDatabase(
+  path: string,
+  mode: "read-only" | "read-write" = "read-write",
+) {
+  const readOnly = mode === "read-only";
+  if (!readOnly && path !== ":memory:") await mkdir(dirname(path), { recursive: true });
+  const db = new DatabaseSync(path, { timeout: 5_000, readOnly });
   try {
-    db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=1000");
-    return new ArtifactSqliteDatabase(db, createArtifactStore(db, true));
+    if (!readOnly)
+      db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=1000");
+    return new DiffContentSqliteDatabase(db, createDiffContentStore(db, !readOnly), mode);
   } catch (error) {
     db.close();
     throw error;

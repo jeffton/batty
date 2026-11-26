@@ -36,6 +36,17 @@ export function cloudEnded(): Error & { statusCode: number } {
   return Object.assign(new Error("Browser session ended."), { statusCode: 410 });
 }
 
+function browserDescriptor(id: string): BrowserDescriptor {
+  return {
+    id: `browser-${id}`,
+    kind: "browser",
+    browserId: id,
+    name: "Cloud browser",
+    url: `/api/cloud-browser/${id}/state`,
+    public: false,
+  };
+}
+
 export class BrowserViewer {
   private readonly cloudOwners = new Map<string, string>();
   private readonly cloudTouches = new Map<
@@ -74,14 +85,13 @@ export class BrowserViewer {
   async cloudAttachment(session: BrowserSession): Promise<BrowserDescriptor> {
     const cloud = await readBrowserJson<{ id: string }>(path.join(session.directory, "cloud.json"));
     if (!cloud) throw new Error("Enable cloud=true before attaching this browser.");
-    return {
-      id: `browser-${cloud.id}`,
-      kind: "browser",
-      browserId: cloud.id,
-      name: "Cloud browser",
-      url: `/api/cloud-browser/${cloud.id}/state`,
-      public: false,
-    };
+    return browserDescriptor(cloud.id);
+  }
+
+  async messageBrowser(workspaceKey: string, browserId: string) {
+    if ((await this.cloudOwner(browserId)) !== workspaceKey)
+      throw new Error("Cloud browser belongs to a different workspace");
+    return browserDescriptor(browserId);
   }
 
   async enableCloud(sessionId: string, session: BrowserSession): Promise<void> {

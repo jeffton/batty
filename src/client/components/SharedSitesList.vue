@@ -1,27 +1,14 @@
 <script setup lang="ts">
-import { Check, Copy, ExternalLink } from "@lucide/vue";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { createSiteMessageHandler } from "@/client/lib/site-functions";
-import FullPopover from "@/client/components/FullPopover.vue";
+import { ExternalLink } from "@lucide/vue";
+import { computed, ref } from "vue";
 import BrowserPopover from "@/client/components/BrowserPopover.vue";
+import SitePopover from "@/client/components/SitePopover.vue";
 import { setSitePublic } from "@/client/lib/api";
-import { withBaseUrl } from "@/client/lib/base-url";
 import type { SiteAttachmentDescriptor, SiteDescriptor } from "@/shared/types";
 
 const props = defineProps<{ sites: SiteAttachmentDescriptor[]; idPrefix?: string }>();
-const siteFrames = new Map<string, HTMLIFrameElement>();
-const siteMessage = createSiteMessageHandler(() => siteFrames.values());
-function setSiteFrame(siteId: string, element: unknown): void {
-  if (element instanceof HTMLIFrameElement) siteFrames.set(siteId, element);
-  else siteFrames.delete(siteId);
-}
-onMounted(() => window.addEventListener("message", siteMessage));
-onBeforeUnmount(() => window.removeEventListener("message", siteMessage));
 const publicById = ref<Record<string, boolean>>({});
 const savingId = ref<string>();
-const copiedId = ref<string>();
-const previewRevisionById = ref<Record<string, number>>({});
-let copiedTimeout: number | undefined;
 
 const displayedSites = computed(() =>
   props.sites.map((site) =>
@@ -31,39 +18,6 @@ const displayedSites = computed(() =>
 
 function popoverId(siteId: string): string {
   return `site-preview-${props.idPrefix ?? ""}-${siteId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
-}
-
-function absoluteUrl(url: string): string {
-  return new URL(url, window.location.href).toString();
-}
-
-function siteUrl(site: SiteDescriptor): string {
-  // Stored attachment URLs retain the base path from when they were created.
-  return withBaseUrl(`/sites/${encodeURIComponent(site.id)}/`);
-}
-
-function previewUrl(site: SiteDescriptor): string {
-  const url = siteUrl(site);
-  const revision = previewRevisionById.value[site.id] ?? 0;
-  return revision === 0 ? url : `${url}?batty_preview=${revision}`;
-}
-
-function refreshPreview(site: SiteDescriptor, event: Event): void {
-  if ((event as ToggleEvent).newState !== "open") return;
-  previewRevisionById.value = {
-    ...previewRevisionById.value,
-    [site.id]: (previewRevisionById.value[site.id] ?? 0) + 1,
-  };
-}
-
-async function copyUrl(site: SiteDescriptor): Promise<void> {
-  await navigator.clipboard.writeText(absoluteUrl(siteUrl(site)));
-  copiedId.value = site.id;
-  if (copiedTimeout !== undefined) window.clearTimeout(copiedTimeout);
-  copiedTimeout = window.setTimeout(() => {
-    copiedId.value = undefined;
-    copiedTimeout = undefined;
-  }, 1400);
 }
 
 async function togglePublic(site: SiteDescriptor, event: Event): Promise<void> {
@@ -79,10 +33,6 @@ async function togglePublic(site: SiteDescriptor, event: Event): Promise<void> {
     savingId.value = undefined;
   }
 }
-
-onBeforeUnmount(() => {
-  if (copiedTimeout !== undefined) window.clearTimeout(copiedTimeout);
-});
 </script>
 
 <template>
@@ -105,13 +55,7 @@ onBeforeUnmount(() => {
         :browser-id="site.browserId"
         :title="site.name"
       />
-      <FullPopover
-        v-else
-        :popover-id="popoverId(site.id)"
-        :title="site.name"
-        :subtitle="absoluteUrl(siteUrl(site))"
-        @toggle="refreshPreview(site, $event)"
-      >
+      <SitePopover v-else :popover-id="popoverId(site.id)" :site="site">
         <template #header-actions>
           <label class="shared-sites__switch">
             <input
@@ -124,26 +68,8 @@ onBeforeUnmount(() => {
             <span class="shared-sites__switch-track" aria-hidden="true"></span>
             Public
           </label>
-          <button
-            type="button"
-            class="shared-sites__header-btn chrome-button chrome-button--icon"
-            title="Copy site URL"
-            aria-label="Copy site URL"
-            @click="copyUrl(site)"
-          >
-            <Check v-if="copiedId === site.id" :size="16" />
-            <Copy v-else :size="16" />
-          </button>
         </template>
-        <iframe
-          class="shared-sites__frame"
-          :ref="(element) => setSiteFrame(site.id, element)"
-          :data-site-id="site.id"
-          :src="previewUrl(site)"
-          :title="site.name"
-          sandbox="allow-downloads allow-forms allow-modals allow-popups allow-scripts"
-        ></iframe>
-      </FullPopover>
+      </SitePopover>
     </article>
   </div>
 </template>
@@ -257,14 +183,6 @@ onBeforeUnmount(() => {
 
 .shared-sites__switch input:disabled + .shared-sites__switch-track {
   opacity: 0.55;
-}
-
-.shared-sites__frame {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: white;
 }
 
 @media (hover: hover) {

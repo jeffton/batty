@@ -29,7 +29,7 @@ import { BrowserService } from "./browser-service";
 import { closeSharedBrowser } from "./browser-runtime";
 import { SshSocksProxy } from "./ssh-socks-proxy";
 import {
-  createAttachFilesTool,
+  createImportFilesTool,
   createBrowserTool,
   createSitesTool,
   createWebSearchTool,
@@ -42,7 +42,6 @@ import { createCodemodeAdapters } from "./codemode-native";
 import { createCodemodeTasks } from "./codemode-tasks";
 import { cancelPersistentBashJobs } from "./durable-bash-cancel";
 import { createBashAbortWatcher } from "./tools-abort-watcher";
-import { createAttachArtifactsTool } from "./artifact-forwarding";
 
 export async function toolCwd(api: ToolExecutionApi, ctx: Context): Promise<string> {
   const cwd = api.env?.cwd ?? (await api.agent(ctx)).cwd;
@@ -188,11 +187,10 @@ export async function createTools(
   };
   const local: ToolRegistration[] = [
     ...native,
-    createAttachArtifactsTool(),
     bridge("web_search", () => createWebSearchTool(config), "safe"),
     scoped("browser", createBrowserTool),
     scoped("sites", createSitesTool),
-    scoped("attach_files", createAttachFilesTool, "safe"),
+    scoped("import_files", createImportFilesTool, "safe"),
   ];
   const resolveTools = async (api: ToolExecutionApi, ctx: Context) => {
     const agent = await api.agent(ctx);

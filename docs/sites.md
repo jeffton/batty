@@ -1,6 +1,6 @@
 # Sites and backend functions
 
-`sites create` allocates a static content directory. Write HTML/assets there and use `sites share` to attach the site to the conversation. Private previews use a read-only capability URL; public sharing exposes static content only.
+`sites create` allocates a static content directory and returns a `site:<id>` reference. Write HTML/assets there. Creation does not attach the site to a response or change its existing public/private status; select it explicitly in the response metadata described in [artifact selection and delivery](artifacts.md). Private previews use a read-only capability URL; public sites expose static content only.
 
 ## Register a function
 

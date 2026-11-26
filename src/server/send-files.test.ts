@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "vite-plus/test";
-import { createAttachFilesTool } from "./custom-tools";
+import { createImportFilesTool } from "./custom-tools";
 import { resolveSentFile, storeSentFiles } from "./send-files";
 
 async function fixture() {
@@ -21,10 +21,10 @@ async function fixture() {
   return { dir, source, options };
 }
 
-test("attach_files replay returns the same result after its source is removed", async () => {
+test("import_files replay returns the same result after its source is removed", async () => {
   const { dir, source, options } = await fixture();
   try {
-    const tool = createAttachFilesTool({
+    const tool = createImportFilesTool({
       workspace: { id: options.workspaceId, path: dir },
       config: { sentFilesDir: options.rootDir },
     } as never);
@@ -45,10 +45,10 @@ test("attach_files replay returns the same result after its source is removed", 
       context,
     );
     expect(replay).toEqual(first);
-    const [file] = (replay.details as { sentFiles: { id: string; storedPath: string }[] })
-      .sentFiles;
-    const resolved = await resolveSentFile({ ...options, fileId: file!.id });
-    expect(resolved.storedPath).toBe(file!.storedPath);
+    expect(replay.details).toEqual({});
+    const ref = JSON.parse((replay.content[0] as { text: string }).text.split("\n").at(-1)!).ref;
+    const resolved = await resolveSentFile({ ...options, fileId: ref.slice("file:".length) });
+    expect(resolved.descriptor.name).toBe("artifact.txt");
     expect(await readFile(resolved.storedPath, "utf8")).toBe("original artifact");
     expect(await readdir(path.dirname(resolved.storedPath))).toEqual([
       "01-artifact.txt",

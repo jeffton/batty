@@ -57,6 +57,7 @@ async function togglePublic(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement;
   const requested = input.checked;
   input.checked = isPublic.value;
+  if (saving.value) return;
   const signal = session!.signal;
   visibilityError.value = "";
   try {
@@ -121,7 +122,8 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
         type="checkbox"
         role="switch"
         :checked="ready && isPublic"
-        :disabled="!ready || saving"
+        :disabled="!ready"
+        :aria-disabled="saving || undefined"
         :indeterminate="!ready"
         @change="togglePublic"
       />
@@ -188,7 +190,7 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
   cursor: inherit;
 }
 
-.site-share__switch input:disabled {
+.site-share__switch input:is(:disabled, [aria-disabled="true"]) {
   cursor: default;
 }
 
@@ -223,7 +225,7 @@ input:checked + .site-share__track::after {
   transform: translateX(0.9rem);
 }
 
-input:disabled + .site-share__track {
+input:is(:disabled, [aria-disabled="true"]) + .site-share__track {
   opacity: 0.55;
 }
 

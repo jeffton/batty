@@ -104,8 +104,10 @@ test("site visibility comes from storage and sibling cards follow confirmed writ
     vi.mocked(setSitePublic).mockReturnValueOnce(save.promise);
     await toggle.setValue(false);
     expect(setSitePublic).toHaveBeenLastCalledWith(site.id, false);
-    expect(toggle.element.disabled).toBe(true);
+    expect(toggle.attributes("aria-disabled")).toBe("true");
     expect(toggle.element.checked).toBe(true);
+    await toggle.setValue(false);
+    expect(setSitePublic).toHaveBeenCalledTimes(1);
     expect(sibling.text()).toContain("Public site");
 
     save.reject(new Error("Write failed"));

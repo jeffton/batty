@@ -326,8 +326,13 @@ test.each([
       expect(state.saves).toEqual([[neverOpened.id, true]]);
       if (mobile) await activate(switcher.locator(".full-popover__title"));
       else {
+        expect(await publicity.evaluate((element) => element === document.activeElement)).toBe(
+          true,
+        );
         await page.keyboard.press("Escape");
-        expect(await share.evaluate((element) => element === document.activeElement)).toBe(true);
+        await expect
+          .poll(() => share.evaluate((element) => element === document.activeElement))
+          .toBe(true);
       }
       await shareMenu.waitFor({ state: "hidden" });
       await activate(close);

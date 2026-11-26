@@ -21,6 +21,7 @@ let browser: Browser;
 let context: BrowserContext;
 let url: string;
 let incrementalSearch: ReadableStreamDefaultController<unknown> | undefined;
+const longBranch = `feature/${"unbroken-branch-name-".repeat(4)}final`;
 const wrappedSource = [
   `export const sentence = "${"Text with spaces and indentation. ".repeat(15)}";`,
   `  const unbroken = "${"a".repeat(420)}";`,
@@ -31,6 +32,9 @@ beforeAll(async () => {
   const project = path.join(root, "workspaces/project");
   await fs.mkdir(path.join(project, "src/empty"), { recursive: true });
   await fs.mkdir(path.join(root, "workspaces/other"));
+  const longWorkspace = path.join(root, "workspaces/long");
+  await fs.mkdir(longWorkspace);
+  await promisify(execFile)("git", ["-C", longWorkspace, "init", `--initial-branch=${longBranch}`]);
   await fs.writeFile(path.join(root, "workspaces/other/other.txt"), "Other workspace");
   await fs.writeFile(path.join(project, "src/main.ts"), 'export const greeting = "Hej 🦾";\n');
   await fs.writeFile(path.join(project, "src/long.ts"), wrappedSource);
@@ -509,13 +513,45 @@ test("search errors and newer queries do not turn partial or stale results into 
   }
 });
 
-test("workspace rows contain wrapped names and paths on desktop and mobile", async () => {
-  for (const width of [1280, 390]) {
+test("workspace rows align branches when they fit and wrap details on mobile", async () => {
+  for (const width of [1280, 390, 320]) {
     const page = await newPage({ viewport: { width, height: 900 } });
     try {
       await page.goto(url);
       const list = page.locator("#tools-Workspaces-panel");
-      await list.getByRole("button", { name: "Browse code in Project" }).waitFor();
+      const project = list.getByRole("button", { name: "Browse code in Project" });
+      const long = list.getByRole("button", { name: /^Browse code in Workspace-with-/ });
+      await project.getByText("feature/current-branch", { exact: true }).waitFor();
+      await long.getByText(longBranch, { exact: true }).waitFor();
+      const layout = (row: typeof project) =>
+        row.evaluate((element) => {
+          const heading = element.querySelector(".tools-popover__workspace-heading")!;
+          const name = heading.querySelector("strong")!.getBoundingClientRect();
+          const branch = heading.querySelector(".tools-popover__branch")!.getBoundingClientRect();
+          const branchText = heading.querySelector(".tools-popover__branch > span")!;
+          const path = element.querySelector("code")!.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(branchText);
+          return {
+            sameLine: branch.top < name.bottom && branch.left >= name.right,
+            branchBelow: branch.top >= name.bottom,
+            rightAligned: Math.abs(heading.getBoundingClientRect().right - branch.right) < 1,
+            pathBelow: path.top >= Math.max(name.bottom, branch.bottom),
+            branchLines: range.getClientRects().length,
+          };
+        });
+      expect(await layout(project)).toEqual({
+        sameLine: true,
+        branchBelow: false,
+        rightAligned: true,
+        pathBelow: true,
+        branchLines: 1,
+      });
+      const longLayout = await layout(long);
+      expect(longLayout.sameLine).toBe(width === 1280);
+      expect(longLayout.branchBelow).toBe(width !== 1280);
+      expect(longLayout.rightAligned && longLayout.pathBelow).toBe(true);
+      expect(longLayout.branchLines > 1).toBe(width !== 1280);
       const rows = await list.locator(".tools-popover__workspace").evaluateAll((elements) =>
         elements.map((element) => {
           const row = element.getBoundingClientRect();
@@ -541,7 +577,7 @@ test("workspace rows contain wrapped names and paths on desktop and mobile", asy
       );
       expect(rows.every((row) => row.detailWeight === "400")).toBe(true);
       expect(rows[0]!.height).toBeGreaterThan(44);
-      if (width === 390) expect(rows[2]!.height).toBeGreaterThan(rows[0]!.height);
+      if (width !== 1280) expect(rows[2]!.height).toBeGreaterThan(rows[0]!.height);
       if (process.env.BATTY_UI_SCREENSHOTS === "1") {
         await fs.mkdir(".tmp/ui-feedback", { recursive: true });
         await page.screenshot({ path: `.tmp/ui-feedback/workspace-list-${width}.png` });

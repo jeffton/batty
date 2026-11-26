@@ -123,10 +123,13 @@ onBeforeUnmount(() => {
         :aria-label="`Browse code in ${workspace.label}`"
         @click="browsingWorkspace = workspace"
       >
-        <strong>{{ workspace.label }}</strong>
-        <span v-if="branches[workspace.id]" class="tools-popover__branch"
-          ><GitBranch :size="14" aria-hidden="true" />{{ branches[workspace.id] }}</span
-        >
+        <span class="tools-popover__workspace-heading">
+          <strong>{{ workspace.label }}</strong>
+          <span v-if="branches[workspace.id]" class="tools-popover__branch">
+            <GitBranch :size="14" aria-hidden="true" />
+            <span>{{ branches[workspace.id] }}</span>
+          </span>
+        </span>
         <code>{{ workspace.path }}</code>
       </button>
       <div v-if="!store.workspaces.length" class="tools-popover__empty">
@@ -218,17 +221,29 @@ onBeforeUnmount(() => {
   gap: 0.3rem;
 }
 
+.tools-popover__workspace-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.75rem;
+}
+
 .tools-popover__branch {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.35rem;
-  min-width: 0;
+  margin-inline-start: auto;
   color: var(--color-text-subtle);
   font-size: 0.78rem;
-  overflow-wrap: anywhere;
 }
 .tools-popover__branch svg {
   flex-shrink: 0;
+  width: 1em;
+  height: 1em;
+}
+
+.tools-popover__branch > span {
+  align-self: baseline;
 }
 
 .tools-popover__workspace:hover {

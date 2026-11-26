@@ -86,7 +86,10 @@ async function siteFixture(page: Page, initialSites: SiteDescriptor[], initialRe
     const id = new URL(route.request().url()).pathname.split("/").at(-2)!;
     const site = sites.find((site) => site.id === id)!;
     loaded.push(id);
-    return route.fulfill({ contentType: "text/html", body: `<h1>${site.name}</h1>` });
+    return route.fulfill({
+      contentType: "text/html",
+      body: `<h1>${site.name}</h1><button style="position:fixed;bottom:12px;left:12px" onclick="this.textContent='Activated'">Page action</button>`,
+    });
   });
   return {
     add(site: SiteDescriptor) {
@@ -99,7 +102,7 @@ async function siteFixture(page: Page, initialSites: SiteDescriptor[], initialRe
   };
 }
 
-test("empty catalog and first chooser don't record a visit, but opening a chat site becomes the toolbar default", async () => {
+test("opens the newest site with no visit history, then uses the most recent visit, including chat opens", async () => {
   const page = await browser.newPage();
   try {
     const state = await siteFixture(page, [], []);
@@ -107,7 +110,7 @@ test("empty catalog and first chooser don't record a visit, but opening a chat s
     const launcher = page.getByRole("button", { name: "Sites", exact: true });
     const switcher = page.getByRole("dialog", { name: "Sites", exact: true });
     const close = switcher.getByRole("button", { name: "Close sites" });
-    const choices = switcher.getByRole("list", { name: "Available sites" });
+    const choices = page.getByRole("list", { name: "Available sites" });
     await launcher.click();
     await switcher.getByText("No sites yet.").waitFor();
     expect(await switcher.locator("iframe").count()).toBe(0);
@@ -115,32 +118,15 @@ test("empty catalog and first chooser don't record a visit, but opening a chat s
     await close.click();
     await switcher.waitFor({ state: "hidden" });
 
-    state.add(descriptor("newest", "New unvisited site"));
+    state.add(descriptor("newest", "Newest site"));
+    state.add(descriptor("attached", "Chat attachment"));
     await launcher.click();
-    await choices.waitFor();
-    expect(
-      (await choices.getByRole("button").allTextContents()).map((name) => name.trim()),
-    ).toEqual(["New unvisited site"]);
-    expect(await switcher.locator("iframe").count()).toBe(0);
-    expect(state.opened).toEqual([]);
-    await page.keyboard.press("Tab");
-    const onlyChoice = choices.getByRole("button", { name: "New unvisited site" });
-    if (!(await onlyChoice.evaluate((element) => element === document.activeElement)))
-      await page.keyboard.press("Tab");
-    expect(await onlyChoice.evaluate((element) => element === document.activeElement)).toBe(true);
-    await page.keyboard.press("Enter");
-    await expect
-      .poll(() => close.evaluate((element) => element === document.activeElement))
-      .toBe(true);
-    await switcher
-      .frameLocator("iframe")
-      .getByRole("heading", { name: "New unvisited site" })
-      .waitFor();
+    await switcher.frameLocator("iframe").getByRole("heading", { name: "Newest site" }).waitFor();
+    expect(await choices.isVisible()).toBe(false);
     await expect.poll(() => state.opened).toEqual(["newest"]);
     await close.click();
     await switcher.waitFor({ state: "hidden" });
 
-    state.add(descriptor("attached", "Chat attachment"));
     await page.getByRole("button", { name: "Open site", exact: true }).click();
     const chat = page.getByRole("dialog", { name: "Chat attachment", exact: true });
     await chat.frameLocator("iframe").getByRole("heading", { name: "Chat attachment" }).waitFor();
@@ -162,7 +148,7 @@ test.each([
   { name: "desktop", width: 1280, height: 840, mobile: false },
   { name: "320px touch", width: 320, height: 660, mobile: true },
 ])(
-  "uses one popover with measured recent tabs, overflow, and Public on $name",
+  "selects sites from a compact header menu, keeps the preview open, and preserves Public on $name",
   async ({ width, height, mobile }) => {
     const context = await browser.newContext({
       viewport: { width, height },
@@ -175,9 +161,10 @@ test.each([
     try {
       const recent = names.map((name, i) => descriptor(`recent-${i}`, name));
       const neverOpened = descriptor("new", "Never opened");
+      const allSites = [...recent, neverOpened];
       const state = await siteFixture(
         page,
-        [...recent, neverOpened],
+        allSites,
         recent.map((site) => site.id),
       );
       await page.goto(url);
@@ -185,63 +172,106 @@ test.each([
         mobile ? target.tap() : target.click();
       const launcher = page.getByRole("button", { name: "Sites", exact: true });
       const switcher = page.getByRole("dialog", { name: "Sites", exact: true });
+      const trigger = switcher.getByRole("button", { name: "Choose site", exact: true });
       const close = switcher.getByRole("button", { name: "Close sites" });
       const frame = switcher.frameLocator("iframe");
-      const tabs = switcher.getByRole("tablist", { name: "Recent sites" });
-      const more = tabs.getByRole("tab", { name: "More sites" });
-      const first = tabs.getByRole("tab", { name: names[0], exact: true });
+      const choices = page.getByRole("list", { name: "Available sites" });
+      const first = choices.getByRole("button", { name: names[0], exact: true });
+      const selected = choices.getByRole("button", { name: neverOpened.name });
+      expect(await launcher.locator("svg").getAttribute("class")).toContain("lucide-app-window");
+      expect(
+        await page
+          .getByRole("button", { name: "Open browser" })
+          .locator("svg")
+          .getAttribute("class"),
+      ).toContain("lucide-globe");
+      if (mobile && process.env.BATTY_SITE_SWITCHER_SCREENSHOTS) {
+        await page.screenshot({
+          path: `${process.env.BATTY_SITE_SWITCHER_SCREENSHOTS}/toolbar.png`,
+        });
+      }
       await activate(launcher);
       await frame.getByRole("heading", { name: names[0] }).waitFor();
       await expect.poll(() => state.opened).toEqual([recent[0]!.id]);
-      await first.waitFor();
-      await more.waitFor();
-      expect((await tabs.getByRole("tab").last().textContent())?.trim()).toBe("More sites");
-      expect(await first.getAttribute("aria-selected")).toBe("true");
-      expect(await switcher.locator("iframe").count()).toBe(1);
+      expect(await trigger.locator("svg").getAttribute("class")).toContain("lucide-square-stack");
       expect(await switcher.locator("iframe").getAttribute("sandbox")).not.toContain(
         "allow-same-origin",
       );
-      expect(await page.locator(":popover-open").count()).toBe(1);
 
-      const tabNames = async () =>
-        (await tabs.getByRole("tab").allTextContents()).map((name) => name.trim());
-      const count = (await tabNames()).length;
-      await page.setViewportSize({ width: mobile ? 1280 : 320, height });
-      if (mobile) await expect.poll(async () => (await tabNames()).length).toBeGreaterThan(count);
-      else await expect.poll(async () => (await tabNames()).length).toBeLessThan(count);
-      await page.setViewportSize({ width, height });
-      await expect.poll(async () => (await tabNames()).length).toBe(count);
-      expect(state.loaded).toEqual([recent[0]!.id]);
-
-      if (mobile) await activate(more);
+      if (mobile) await activate(trigger);
       else {
-        await first.focus();
-        await page.keyboard.press("End");
-        expect(await more.evaluate((element) => element === document.activeElement)).toBe(true);
-        expect(await first.getAttribute("aria-selected")).toBe("true");
+        await trigger.focus();
         await page.keyboard.press("Enter");
+        await expect
+          .poll(() => first.evaluate((element) => element === document.activeElement))
+          .toBe(true);
       }
-      const choices = switcher.getByRole("list", { name: "Available sites" });
       await choices.waitFor();
-      expect(await more.getAttribute("aria-selected")).toBe("true");
-      expect(await switcher.locator("iframe").isVisible()).toBe(false);
-      const visible = await tabNames();
-      const remaining = [...recent, neverOpened].filter((site) => !visible.includes(site.name));
+      expect(await first.getAttribute("aria-current")).toBe("page");
       expect(
         (await choices.getByRole("button").allTextContents()).map((name) => name.trim()),
-      ).toEqual(remaining.map((site) => site.name));
-      expect(state.opened).toEqual([recent[0]!.id]);
+      ).toEqual(allSites.map((site) => site.name));
+      await expect
+        .poll(async () => {
+          const menu = await choices.boundingBox();
+          const preview = await switcher.boundingBox();
+          return (
+            !!menu &&
+            !!preview &&
+            menu.x > preview.x &&
+            menu.x + menu.width < preview.x + preview.width &&
+            menu.height < preview.height
+          );
+        })
+        .toBe(true);
+      expect(await switcher.locator("iframe").isVisible()).toBe(true);
+      await expect.poll(() => switcher.locator("iframe").getAttribute("inert")).toBe("");
+      expect(await page.locator(":popover-open").count()).toBe(2);
+      expect(state.loaded).toEqual([recent[0]!.id]);
+      if (process.env.BATTY_SITE_SWITCHER_SCREENSHOTS) {
+        await page.screenshot({
+          path: `${process.env.BATTY_SITE_SWITCHER_SCREENSHOTS}/${mobile ? "mobile" : "desktop"}.png`,
+        });
+      }
 
+      if (!mobile) {
+        await page.keyboard.press("Escape");
+        await choices.waitFor({ state: "hidden" });
+        expect(await trigger.evaluate((element) => element === document.activeElement)).toBe(true);
+        await activate(trigger);
+        await choices.waitFor();
+      }
+      const siteAction = frame.getByRole("button", { name: "Page action" });
+      const bounds = (await siteAction.boundingBox())!;
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + bounds.height / 2;
+      if (mobile) await page.touchscreen.tap(x, y);
+      else await page.mouse.click(x, y);
+      await choices.waitFor({ state: "hidden" });
+      expect(await siteAction.isVisible()).toBe(true);
+      await activate(siteAction);
+      await frame.getByRole("button", { name: "Activated" }).waitFor();
+      expect(state.opened).toEqual([recent[0]!.id]);
+      await activate(trigger);
       await activate(first);
-      await frame.getByRole("heading", { name: names[0] }).waitFor();
+      await choices.waitFor({ state: "hidden" });
       expect(state.loaded).toEqual([recent[0]!.id]);
       expect(state.opened).toEqual([recent[0]!.id]);
-      await activate(more);
-      await activate(choices.getByRole("button", { name: neverOpened.name }));
+
+      if (mobile) {
+        await activate(trigger);
+        await activate(selected);
+      } else {
+        await trigger.press("Enter");
+        for (const _site of recent) await page.keyboard.press("Tab");
+        expect(await selected.evaluate((element) => element === document.activeElement)).toBe(true);
+        await page.keyboard.press("Enter");
+      }
+      await choices.waitFor({ state: "hidden" });
       await frame.getByRole("heading", { name: neverOpened.name }).waitFor();
       await expect.poll(() => state.opened).toEqual([recent[0]!.id, neverOpened.id]);
-      const current = tabs.getByRole("tab", { name: neverOpened.name });
-      expect(await current.getAttribute("aria-selected")).toBe("true");
+      expect(await switcher.locator(".full-popover__title").textContent()).toBe(neverOpened.name);
+      expect(await trigger.evaluate((element) => element === document.activeElement)).toBe(true);
 
       const publicity = switcher.getByRole("switch", { name: "Public" });
       await activate(publicity);
@@ -261,12 +291,11 @@ test.each([
       ]);
       expect(state.catalogCalls()).toBe(2);
       expect(state.opened).toEqual([recent[0]!.id, neverOpened.id, neverOpened.id]);
-      if (process.env.BATTY_SITE_SWITCHER_SCREENSHOTS)
-        await page.screenshot({
-          path: `${process.env.BATTY_SITE_SWITCHER_SCREENSHOTS}/${mobile ? "mobile" : "desktop"}.png`,
-        });
+      await activate(trigger);
+      expect(await selected.getAttribute("aria-current")).toBe("page");
       await activate(close);
       await switcher.waitFor({ state: "hidden" });
+      await choices.waitFor({ state: "hidden" });
       expect(await launcher.evaluate((element) => element === document.activeElement)).toBe(true);
     } finally {
       await context.close();
@@ -274,47 +303,6 @@ test.each([
   },
   30_000,
 );
-
-test("resize preserves focus if a tab or More choice stops fitting", async () => {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  try {
-    const sites = names.slice(0, 4).map((name, i) => descriptor(`small-set-${i}`, name));
-    const state = await siteFixture(
-      page,
-      sites,
-      sites.map((site) => site.id),
-    );
-    await page.goto(url);
-    await page.getByRole("button", { name: "Sites", exact: true }).click();
-    const switcher = page.getByRole("dialog", { name: "Sites" });
-    const tabs = switcher.getByRole("tablist", { name: "Recent sites" });
-    const first = tabs.getByRole("tab", { name: names[0] });
-    const last = tabs.getByRole("tab", { name: names[3] });
-    const more = tabs.getByRole("tab", { name: "More sites" });
-    await last.waitFor();
-    await more.waitFor({ state: "hidden" });
-    await last.focus();
-    await page.setViewportSize({ width: 320, height: 800 });
-    await last.waitFor({ state: "detached" });
-    await expect
-      .poll(() => more.evaluate((element) => element === document.activeElement))
-      .toBe(true);
-    await page.keyboard.press("Enter");
-    const choice = switcher.getByRole("button", { name: names[3] });
-    await choice.waitFor();
-    await choice.focus();
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await expect
-      .poll(() => first.evaluate((element) => element === document.activeElement))
-      .toBe(true);
-    await more.waitFor({ state: "hidden" });
-    await switcher.frameLocator("iframe").getByRole("heading", { name: names[0] }).waitFor();
-    expect(state.opened).toEqual([sites[0]!.id]);
-    expect(state.loaded).toEqual([sites[0]!.id]);
-  } finally {
-    await page.close();
-  }
-}, 30_000);
 
 test("a delayed open response cannot replace the current site", async () => {
   const page = await browser.newPage();
@@ -337,7 +325,10 @@ test("a delayed open response cannot replace the current site", async () => {
     const switcher = page.getByRole("dialog", { name: "Sites" });
     await expect.poll(() => state.opened).toEqual([first.id]);
     await switcher.frameLocator("iframe").getByRole("heading", { name: first.name }).waitFor();
-    await switcher.getByRole("tab", { name: second.name }).click();
+    const trigger = switcher.getByRole("button", { name: "Choose site", exact: true });
+    await trigger.click();
+    const choices = page.getByRole("list", { name: "Available sites" });
+    await choices.getByRole("button", { name: second.name }).click();
     const heading = switcher.frameLocator("iframe").getByRole("heading", { name: second.name });
     await heading.waitFor();
     await expect.poll(() => state.opened).toEqual([first.id, second.id]);
@@ -348,9 +339,7 @@ test("a delayed open response cannot replace the current site", async () => {
     await expect.poll(() => publicity.isChecked()).toBe(true);
     expect(state.saves).toEqual([[second.id, true]]);
     expect(await heading.isVisible()).toBe(true);
-    expect(
-      await switcher.getByRole("tab", { name: second.name }).getAttribute("aria-selected"),
-    ).toBe("true");
+    expect(await switcher.locator(".full-popover__title").textContent()).toBe(second.name);
     expect(state.loaded).toEqual([first.id, second.id]);
   } finally {
     release.resolve();

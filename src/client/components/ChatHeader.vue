@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PanelsTopLeft, Wrench, Clock3, Globe } from "@lucide/vue";
+import { AppWindow, Wrench, Clock3, Globe } from "@lucide/vue";
 import { nextTick, ref } from "vue";
 import { openCloudBrowser } from "@/client/lib/api";
 import BrowserPopover from "./BrowserPopover.vue";
@@ -88,7 +88,7 @@ async function logout() {
         aria-label="Sites"
         title="Sites"
       >
-        <PanelsTopLeft :size="17" />
+        <AppWindow :size="17" />
       </button>
     </div>
     <BrowserPopover

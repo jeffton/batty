@@ -1,69 +1,22 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { Check, SquareStack } from "@lucide/vue";
+import { onBeforeUnmount, ref, shallowRef } from "vue";
 import { getSiteCatalog } from "@/client/lib/api";
 import type { OwnerOutputs } from "@/shared/owner-api";
 import type { SiteDescriptor } from "@/shared/types";
+import BasePopover from "./BasePopover.vue";
 import LoadingIndicator from "./LoadingIndicator.vue";
 import SitePopover from "./SitePopover.vue";
-import SiteSwitcherTabs from "./SiteSwitcherTabs.vue";
 
 const props = defineProps<{ popoverId: string }>();
-const catalog = shallowRef<OwnerOutputs["site.catalog"]>({ sites: [], recentSiteIds: [] });
+const sites = shallowRef<SiteDescriptor[]>([]);
 const activeSite = shallowRef<SiteDescriptor>();
-const showingMore = ref(false);
+const chooser = ref<InstanceType<typeof BasePopover>>();
+const trigger = ref<HTMLButtonElement>();
+const choosing = ref(false);
 const loading = ref(false);
 const error = ref("");
-const visibleCount = ref(0);
 let request: AbortController | undefined;
-
-const recent = computed(() => {
-  const byId = new Map(catalog.value.sites.map((site) => [site.id, site]));
-  return catalog.value.recentSiteIds.flatMap((id) => {
-    const site = byId.get(id);
-    return site ? [site] : [];
-  });
-});
-const hasUnvisited = computed(() => catalog.value.sites.length > recent.value.length);
-const showTabs = computed(() => !!activeSite.value && catalog.value.sites.length > 1);
-const remaining = computed(() => {
-  const visible = new Set(
-    recent.value.slice(0, Math.max(1, visibleCount.value)).map((site) => site.id),
-  );
-  return catalog.value.sites.filter((site) => !visible.has(site.id));
-});
-const panelLabelledBy = computed(() =>
-  showTabs.value
-    ? `${props.popoverId}-${showingMore.value ? "more" : activeSite.value!.id}-tab`
-    : undefined,
-);
-
-watch(remaining, (sites) => {
-  if (!sites.length && activeSite.value) showingMore.value = false;
-});
-
-function tab(id?: string): HTMLElement | null {
-  return id ? document.getElementById(`${props.popoverId}-${id}-tab`) : null;
-}
-
-function focusControl(preferred?: string): void {
-  const popover = document.getElementById(props.popoverId);
-  if (!popover?.matches(":popover-open")) return;
-  const control =
-    tab(preferred) ??
-    popover.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
-    popover.querySelector<HTMLElement>(".full-popover__close");
-  control?.focus({ preventScroll: true });
-}
-
-watch([visibleCount, remaining], async () => {
-  const popover = document.getElementById(props.popoverId);
-  const focused = document.activeElement;
-  if (!focused || !popover?.contains(focused)) return;
-  await nextTick();
-  if (document.activeElement === document.body && !focused.isConnected) {
-    focusControl(focused.getAttribute("role") === "tab" ? "more" : undefined);
-  }
-});
 
 async function loadCatalog(): Promise<void> {
   request = new AbortController();
@@ -73,8 +26,8 @@ async function loadCatalog(): Promise<void> {
   try {
     const result = await getSiteCatalog(signal);
     if (signal.aborted) return;
-    catalog.value = result;
-    activeSite.value = recent.value[0];
+    sites.value = result.sites;
+    activeSite.value = result.sites[0];
   } catch (cause) {
     if (!signal.aborted) error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
@@ -87,28 +40,24 @@ function handleToggle(event: Event): void {
     void loadCatalog();
   } else {
     request?.abort();
+    choosing.value = false;
     activeSite.value = undefined;
-    showingMore.value = false;
-    visibleCount.value = 0;
-    catalog.value = { sites: [], recentSiteIds: [] };
+    sites.value = [];
   }
 }
 
-async function selectSite(site: SiteDescriptor): Promise<void> {
-  if (activeSite.value?.id !== site.id) {
-    activeSite.value = site;
-    catalog.value = {
-      ...catalog.value,
-      recentSiteIds: [site.id, ...catalog.value.recentSiteIds.filter((id) => id !== site.id)],
-    };
-  }
-  showingMore.value = false;
-  await nextTick();
-  focusControl(site.id);
+function closeChooser(): void {
+  chooser.value?.hidePopover();
+  trigger.value?.focus({ preventScroll: true });
+}
+
+function selectSite(site: SiteDescriptor): void {
+  closeChooser();
+  if (activeSite.value?.id !== site.id) activeSite.value = site;
 }
 
 function onSiteOpened(result: OwnerOutputs["site.open"]): void {
-  catalog.value = result;
+  sites.value = result.sites;
   activeSite.value = result.site;
 }
 
@@ -120,85 +69,129 @@ onBeforeUnmount(() => request?.abort());
     :popover-id="props.popoverId"
     :site="activeSite"
     label="Sites"
-    :show-site="!showingMore"
-    :panel-id="`${props.popoverId}-panel`"
-    :panel-labelled-by="panelLabelledBy"
+    :preview-inert="choosing"
+    class="site-switcher-preview"
     @toggle="handleToggle"
     @opened="onSiteOpened"
   >
-    <template v-if="activeSite && showTabs" #tabs>
-      <SiteSwitcherTabs
-        v-model:visible-count="visibleCount"
-        :id-prefix="props.popoverId"
-        :recent="recent"
-        :active-id="activeSite.id"
-        :showing-more="showingMore"
-        :has-unvisited="hasUnvisited"
-        @select="selectSite"
-        @more="showingMore = true"
-      />
-    </template>
-    <div class="site-switcher">
-      <LoadingIndicator v-if="loading" class="site-switcher__status" label="Loading sites" />
-      <p v-else-if="error" class="site-switcher__status site-switcher__error" role="alert">
-        {{ error }}
-      </p>
-      <ul
-        v-else-if="remaining.length"
-        class="site-switcher__list"
-        role="list"
-        aria-label="Available sites"
+    <template v-if="activeSite" #actions>
+      <button
+        ref="trigger"
+        type="button"
+        class="chrome-button chrome-button--icon"
+        :popovertarget="`${props.popoverId}-chooser`"
+        aria-label="Choose site"
+        title="Choose site"
       >
-        <li v-for="site in remaining" :key="site.id">
-          <button type="button" class="site-switcher__choice" @click="selectSite(site)">
-            {{ site.name }}
-          </button>
-        </li>
-      </ul>
-      <p v-else class="site-switcher__status">No sites yet.</p>
-    </div>
+        <SquareStack :size="18" />
+      </button>
+      <BasePopover
+        :id="`${props.popoverId}-chooser`"
+        ref="chooser"
+        anchor-down
+        :boundary-id="props.popoverId"
+        class="site-chooser"
+        @toggle="choosing = ($event as ToggleEvent).newState === 'open'"
+        @keydown.esc.stop.prevent="closeChooser"
+      >
+        <ul class="site-chooser__list" role="list" aria-label="Available sites">
+          <li v-for="site in sites" :key="site.id">
+            <button
+              type="button"
+              class="site-chooser__item"
+              :aria-current="site.id === activeSite.id ? 'page' : undefined"
+              :autofocus="site.id === activeSite.id"
+              @click="selectSite(site)"
+            >
+              <span class="site-chooser__check" aria-hidden="true">
+                <Check v-if="site.id === activeSite.id" :size="16" />
+              </span>
+              {{ site.name }}
+            </button>
+          </li>
+        </ul>
+      </BasePopover>
+    </template>
+    <LoadingIndicator v-if="loading" class="site-switcher__status" label="Loading sites" />
+    <p v-else-if="error" class="site-switcher__status site-switcher__error" role="alert">
+      {{ error }}
+    </p>
+    <p v-else class="site-switcher__status">No sites yet.</p>
   </SitePopover>
 </template>
 
 <style scoped>
-.site-switcher {
-  height: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  background: var(--color-bg-app);
+:global(.site-chooser) {
+  width: 20rem;
+  padding: 0.3rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.6rem;
+  background: var(--color-bg-overlay);
+  color: var(--color-text);
+  box-shadow: var(--color-shadow-popover);
+  overflow: auto;
 }
 
-.site-switcher__list {
-  max-width: 60rem;
-  margin: 0 auto;
+.site-chooser__list {
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.site-switcher__choice {
-  display: block;
+.site-chooser__item {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
   width: 100%;
   height: auto;
-  padding: 0.65rem 1rem;
+  min-height: 2.75rem;
+  padding: 0.6rem;
   border: 0;
-  border-bottom: 1px solid var(--color-border-soft);
+  border-radius: 0.4rem;
   background: transparent;
-  color: var(--color-text);
+  color: inherit;
   font: inherit;
   text-align: left;
   overflow-wrap: anywhere;
   cursor: pointer;
 }
 
+.site-chooser__check {
+  display: flex;
+}
+
+.site-chooser__item[aria-current] {
+  background: var(--color-chrome-hover);
+  color: var(--color-link);
+}
+
 @media (hover: hover) {
-  .site-switcher__choice:hover {
+  .site-chooser__item:hover {
     background: var(--color-chrome-hover);
+    color: var(--color-link);
   }
 }
 
-.site-switcher__choice:focus-visible {
+.site-chooser__item:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
+}
+
+@media (max-width: 360px) {
+  :global(.site-switcher-preview .full-popover__header) {
+    padding-inline: 0.55rem;
+    column-gap: 0.25rem;
+  }
+
+  :global(.site-switcher-preview .full-popover__header-actions) {
+    gap: 0;
+  }
+
+  :global(.site-switcher-preview .full-popover__header-actions .chrome-button--icon) {
+    width: 40px;
+    min-width: 40px;
+  }
 }
 
 .site-switcher__status {

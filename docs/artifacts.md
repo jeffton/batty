@@ -1,6 +1,6 @@
 # Artifacts
 
-The Sites button opens the most recently viewed local site. The preview header fits as many recent tabs as space allows; **More** lists the rest. If no site has been viewed, the button opens the chooser.
+The Sites button opens the most recently viewed local site, or the newest site if none has been viewed. Use **Choose site** in the preview header to switch sites.
 
 Files are available from their messages, including worker reports. Text files open in a read-only code view, with wrap and full download. Diffs and live browsers stay on messages.
 

@@ -14,17 +14,12 @@ import {
 import type { SiteDescriptor } from "@/shared/types";
 import type { OwnerOutputs } from "@/shared/owner-api";
 
-const props = withDefaults(
-  defineProps<{
-    popoverId: string;
-    site?: SiteDescriptor;
-    label?: string;
-    showSite?: boolean;
-    panelId?: string;
-    panelLabelledBy?: string;
-  }>(),
-  { showSite: true },
-);
+const props = defineProps<{
+  popoverId: string;
+  site?: SiteDescriptor;
+  label?: string;
+  previewInert?: boolean;
+}>();
 const emit = defineEmits<{
   toggle: [event: Event];
   opened: [catalog: OwnerOutputs["site.open"]];
@@ -41,7 +36,6 @@ const isPublic = computed(() =>
   siteId.value ? (confirmedSitePublic(siteId.value) ?? false) : false,
 );
 const saving = computed(() => !!siteId.value && savingSiteVisibility.has(siteId.value));
-const showHeader = computed(() => props.showSite && !!props.site);
 let copiedTimeout: number | undefined;
 
 const url = computed(() =>
@@ -123,17 +117,15 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
 <template>
   <FullPopover
     :popover-id="props.popoverId"
-    :title="showHeader ? props.site!.name : 'Sites'"
-    :subtitle="showHeader ? absoluteUrl : undefined"
+    :title="props.site?.name ?? 'Sites'"
+    :subtitle="absoluteUrl"
     :close-label="props.label ? 'Close sites' : 'Close site'"
     role="dialog"
     :aria-label="props.label ?? props.site?.name"
     @toggle="handleToggle"
   >
-    <template v-if="$slots.tabs" #header-content>
-      <slot name="tabs" />
-    </template>
-    <template v-if="showHeader" #header-actions>
+    <template v-if="props.site" #header-actions>
+      <slot name="actions" />
       <label
         class="site-popover__switch"
         :aria-busy="(!visibilityReady && !visibilityError) || saving"
@@ -160,14 +152,8 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
         <Copy v-else :size="16" />
       </button>
     </template>
-    <div
-      v-if="open"
-      class="site-popover__panel"
-      :id="props.panelId"
-      :role="props.panelLabelledBy ? 'tabpanel' : undefined"
-      :aria-labelledby="props.panelLabelledBy"
-    >
-      <div v-if="props.site" v-show="props.showSite" class="site-popover__content">
+    <div v-if="open" class="site-popover__panel">
+      <div v-if="props.site" class="site-popover__content">
         <div v-if="openError || visibilityError" class="site-popover__errors">
           <p v-if="openError" role="alert" class="site-popover__error">{{ openError }}</p>
           <p v-if="visibilityError" role="alert" class="site-popover__error">
@@ -181,10 +167,11 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
           :data-site-id="props.site.id"
           :src="`${url}?batty_preview=${revision}`"
           :title="props.site.name"
+          :inert="props.previewInert"
           sandbox="allow-downloads allow-forms allow-modals allow-popups allow-scripts"
         ></iframe>
       </div>
-      <slot v-if="!props.site || !props.showSite" />
+      <slot v-else />
     </div>
   </FullPopover>
 </template>

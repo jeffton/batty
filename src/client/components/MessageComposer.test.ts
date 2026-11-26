@@ -44,8 +44,10 @@ describe("file attachments", () => {
       await wrapper.get('button[aria-label="Send prompt"]').trigger("click");
       expect(wrapper.emitted("submit")).toBeUndefined();
       finish(new TextEncoder().encode("same pixels").buffer);
-      await vi.waitFor(() => expect(wrapper.findAll(".composer__chip")).toHaveLength(2));
-      await wrapper.get('button[aria-label="Send prompt"]').trigger("click");
+      const send = wrapper.get<HTMLButtonElement>('button[aria-label="Send prompt"]');
+      await vi.waitFor(() => expect(send.element.disabled).toBe(false));
+      expect(wrapper.findAll(".composer__chip")).toHaveLength(2);
+      await send.trigger("click");
       const submitted = wrapper.emitted("submit")![0]![1] as File[];
       expect(submitted).toHaveLength(2);
       expect(await Promise.all(submitted.map((value) => value.arrayBuffer()))).toEqual([

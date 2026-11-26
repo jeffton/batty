@@ -166,6 +166,9 @@ export function getMemoryTree() {
 export function expandMemoryNode(id: number, count: number) {
   return query("memory.expand", { id, count });
 }
+export function getSite(siteId: string, signal?: AbortSignal) {
+  return query("site.get", { siteId }, signal);
+}
 export function setSitePublic(siteId: string, isPublic: boolean) {
   return value("site.public", { siteId, public: isPublic });
 }

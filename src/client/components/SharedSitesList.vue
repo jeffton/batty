@@ -1,47 +1,25 @@
 <script setup lang="ts">
 import { ExternalLink } from "@lucide/vue";
-import { computed, ref } from "vue";
 import BrowserPopover from "@/client/components/BrowserPopover.vue";
 import SitePopover from "@/client/components/SitePopover.vue";
-import { setSitePublic } from "@/client/lib/api";
-import type { SiteAttachmentDescriptor, SiteDescriptor } from "@/shared/types";
+import { confirmedSitePublic } from "@/client/lib/site-visibility";
+import type { SiteAttachmentDescriptor } from "@/shared/types";
 
 const props = defineProps<{ sites: SiteAttachmentDescriptor[]; idPrefix?: string }>();
-const publicById = ref<Record<string, boolean>>({});
-const savingId = ref<string>();
-
-const displayedSites = computed(() =>
-  props.sites.map((site) =>
-    site.kind === "site" ? { ...site, public: publicById.value[site.id] ?? site.public } : site,
-  ),
-);
 
 function popoverId(siteId: string): string {
   return `site-preview-${props.idPrefix ?? ""}-${siteId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
-}
-
-async function togglePublic(site: SiteDescriptor, event: Event): Promise<void> {
-  const isPublic = (event.target as HTMLInputElement).checked;
-  savingId.value = site.id;
-  try {
-    const updated = await setSitePublic(site.id, isPublic);
-    publicById.value = { ...publicById.value, [site.id]: updated.public };
-  } catch (error) {
-    publicById.value = { ...publicById.value, [site.id]: site.public };
-    throw error;
-  } finally {
-    savingId.value = undefined;
-  }
 }
 </script>
 
 <template>
   <div class="shared-sites">
-    <article v-for="site in displayedSites" :key="site.id" class="shared-sites__card">
+    <article v-for="site in props.sites" :key="site.id" class="shared-sites__card">
       <div class="shared-sites__meta">
         <strong>{{ site.name }}</strong>
-        <span>{{
-          site.kind === "browser" ? "Cloud browser" : site.public ? "Public site" : "Private site"
+        <span v-if="site.kind === 'browser'">Cloud browser</span>
+        <span v-else>{{
+          (confirmedSitePublic(site.id) ?? site.public) ? "Public site" : "Private site"
         }}</span>
       </div>
       <button type="button" class="shared-sites__open" :popovertarget="popoverId(site.id)">
@@ -55,21 +33,7 @@ async function togglePublic(site: SiteDescriptor, event: Event): Promise<void> {
         :browser-id="site.browserId"
         :title="site.name"
       />
-      <SitePopover v-else :popover-id="popoverId(site.id)" :site="site">
-        <template #header-actions>
-          <label class="shared-sites__switch">
-            <input
-              type="checkbox"
-              role="switch"
-              :checked="site.public"
-              :disabled="savingId === site.id"
-              @change="togglePublic(site, $event)"
-            />
-            <span class="shared-sites__switch-track" aria-hidden="true"></span>
-            Public
-          </label>
-        </template>
-      </SitePopover>
+      <SitePopover v-else :popover-id="popoverId(site.id)" :site="site" />
     </article>
   </div>
 </template>
@@ -129,60 +93,6 @@ async function togglePublic(site: SiteDescriptor, event: Event): Promise<void> {
   flex: 0 0 auto;
   margin-left: auto;
   white-space: nowrap;
-}
-
-.shared-sites__switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.shared-sites__switch input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.shared-sites__switch-track {
-  position: relative;
-  width: 2rem;
-  height: 1.1rem;
-  border-radius: 999px;
-  background: var(--color-border-strong);
-  transition: background 120ms ease;
-}
-
-.shared-sites__switch-track::after {
-  position: absolute;
-  top: 0.15rem;
-  left: 0.15rem;
-  width: 0.8rem;
-  height: 0.8rem;
-  border-radius: 50%;
-  background: var(--color-bg-overlay);
-  box-shadow: 0 1px 2px color-mix(in srgb, black 30%, transparent);
-  content: "";
-  transition: transform 120ms ease;
-}
-
-.shared-sites__switch input:checked + .shared-sites__switch-track {
-  background: var(--color-accent);
-}
-
-.shared-sites__switch input:checked + .shared-sites__switch-track::after {
-  transform: translateX(0.9rem);
-}
-
-.shared-sites__switch input:focus-visible + .shared-sites__switch-track {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.shared-sites__switch input:disabled + .shared-sites__switch-track {
-  opacity: 0.55;
 }
 
 @media (hover: hover) {

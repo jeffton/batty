@@ -69,10 +69,15 @@ export async function listStoredSites(rootDir: string, baseUrl: string) {
   const records: { site: SiteDescriptor; createdAt: number }[] = [];
   for (const directory of await storageDirectories(rootDir)) {
     try {
-      const manifest = await readManifest(rootDir, path.basename(directory));
-      records.push({ site: descriptor(manifest, baseUrl), createdAt: manifest.createdAt });
+      const id = path.basename(directory);
+      const manifest = await readManifest(rootDir, id);
+      if (manifest.id !== id) continue;
+      const index = await resolveSiteContent(rootDir, id, "index.html");
+      if (index.size > 0)
+        records.push({ site: descriptor(manifest, baseUrl), createdAt: manifest.createdAt });
     } catch (error) {
-      if ((error as { statusCode?: number }).statusCode !== 404) throw error;
+      const status = (error as { statusCode?: number }).statusCode;
+      if (status !== 404 && status !== 400) throw error;
     }
   }
   return records;
@@ -106,11 +111,17 @@ export async function getSite(
   rootDir: string,
   baseUrl: string,
   siteId: string,
-): Promise<{ descriptor: SiteDescriptor; directory: string; browserUrl: string }> {
+): Promise<{
+  descriptor: SiteDescriptor;
+  directory: string;
+  browserUrl: string;
+  createdAt: number;
+}> {
   const manifest = await readManifest(rootDir, siteId);
   const site = descriptor(manifest, baseUrl);
   return {
     descriptor: site,
+    createdAt: manifest.createdAt,
     directory: path.join(siteDirectory(rootDir, siteId), CONTENT_DIR),
     browserUrl: browserSiteUrl(baseUrl, manifest.id, manifest.accessToken),
   };
@@ -142,13 +153,7 @@ function requestedRelativePath(value: string): string {
   return normalized.endsWith("/") ? `${normalized}index.html` : normalized;
 }
 
-export async function resolveSiteFile(
-  rootDir: string,
-  baseUrl: string,
-  siteId: string,
-  requestPath: string,
-): Promise<ResolvedSiteFile> {
-  const manifest = await readManifest(rootDir, siteId);
+async function resolveSiteContent(rootDir: string, siteId: string, requestPath: string) {
   const contentRoot = path.join(siteDirectory(rootDir, siteId), CONTENT_DIR);
   const relativePath = requestedRelativePath(requestPath);
   let filePath = path.resolve(contentRoot, relativePath);
@@ -169,17 +174,27 @@ export async function resolveSiteFile(
     if (realFile !== realRoot && !realFile.startsWith(`${realRoot}${path.sep}`)) {
       throw Object.assign(new Error("Invalid site path"), { statusCode: 400 });
     }
-    if (!(await fs.stat(realFile)).isFile()) {
+    const file = await fs.stat(realFile);
+    if (!file.isFile()) {
       throw Object.assign(new Error("Site file not found"), { statusCode: 404 });
     }
-    filePath = realFile;
+    return { filePath: realFile, size: file.size };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw Object.assign(new Error("Site file not found"), { statusCode: 404 });
     }
     throw error;
   }
+}
 
+export async function resolveSiteFile(
+  rootDir: string,
+  baseUrl: string,
+  siteId: string,
+  requestPath: string,
+): Promise<ResolvedSiteFile> {
+  const manifest = await readManifest(rootDir, siteId);
+  const { filePath } = await resolveSiteContent(rootDir, siteId, requestPath);
   return {
     descriptor: descriptor(manifest, baseUrl),
     filePath,

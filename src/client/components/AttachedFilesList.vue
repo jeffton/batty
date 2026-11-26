@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useId } from "vue";
+import { artifactTextUrl, isTextArtifactCandidate } from "@/shared/artifact-library";
+import ArtifactTextPopover from "./ArtifactTextPopover.vue";
 import AttachedFileDownload from "./AttachedFileDownload.vue";
 import TranscriptImage from "./TranscriptImage.vue";
 import { fileThumbnailUrl, imageViewerUrl } from "@/client/lib/file-preview";
@@ -7,14 +10,17 @@ import type { SentFileDescriptor } from "@/shared/types";
 const props = withDefaults(
   defineProps<{
     files: SentFileDescriptor[];
-    preview?: boolean;
+    previewMedia?: boolean;
     compact?: boolean;
   }>(),
   {
-    preview: true,
+    previewMedia: true,
     compact: false,
   },
 );
+
+const previewPrefix = useId();
+const previewId = (id: string) => `${previewPrefix}-${encodeURIComponent(id)}`;
 
 function formatFileSize(size: number): string {
   if (!Number.isFinite(size) || size < 1024) {
@@ -38,13 +44,13 @@ function formatFileSize(size: number): string {
   <div :class="['attached-files', props.compact ? 'attached-files--compact' : '']">
     <article v-for="file in props.files" :key="file.id" class="attached-files__card">
       <TranscriptImage
-        v-if="props.preview && file.kind === 'image' && file.previewUrl"
+        v-if="props.previewMedia && file.kind === 'image' && file.previewUrl"
         :src="fileThumbnailUrl(file.previewUrl)"
         :original-url="imageViewerUrl(file, file.previewUrl)"
         :alt="file.name"
       />
       <video
-        v-else-if="props.preview && file.kind === 'video' && file.previewUrl"
+        v-else-if="props.previewMedia && file.kind === 'video' && file.previewUrl"
         :src="file.previewUrl"
         class="attached-files__preview"
         preload="metadata"
@@ -59,7 +65,24 @@ function formatFileSize(size: number): string {
         >
       </div>
 
-      <AttachedFileDownload :file="file" class="attached-files__download" />
+      <div class="attached-files__actions">
+        <template v-if="isTextArtifactCandidate(file)">
+          <button
+            type="button"
+            class="chrome-button"
+            :popovertarget="previewId(file.id)"
+            :aria-label="`Preview ${file.name}`"
+          >
+            Preview
+          </button>
+          <ArtifactTextPopover
+            :popover-id="previewId(file.id)"
+            :file="file"
+            :preview-url="artifactTextUrl(file.downloadUrl)"
+          />
+        </template>
+        <AttachedFileDownload :file="file" class="attached-files__download" />
+      </div>
     </article>
   </div>
 </template>
@@ -109,15 +132,25 @@ function formatFileSize(size: number): string {
   overflow-wrap: anywhere;
 }
 
-.attached-files :deep(.attached-files__download) {
-  justify-self: start;
+.attached-files__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.attached-files__actions :deep(.attached-files__download) {
   color: var(--color-accent);
   text-decoration: none;
   font-weight: 600;
 }
 
+.attached-files__actions :deep([role="alert"]) {
+  flex-basis: 100%;
+}
+
 @media (hover: hover) {
-  .attached-files :deep(.attached-files__download:hover) {
+  .attached-files__actions :deep(.attached-files__download:hover) {
     text-decoration: underline;
   }
 }

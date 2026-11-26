@@ -546,7 +546,7 @@ async function copyAssistantMarkdown(): Promise<void> {
         <AttachedFilesList
           v-else-if="block.type === 'attachment'"
           :files="[block.file]"
-          :preview="false"
+          :preview-media="false"
           compact
         />
         <MarkdownBlock

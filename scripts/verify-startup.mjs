@@ -219,6 +219,13 @@ for (const baseUrl of ["/", "/batty"]) {
       .jpeg()
       .toBuffer();
     await fs.writeFile(path.join(attachmentDir, attachmentName), original);
+    const textId = "0eb978a4-36a3-4a74-926f-5eaf64644922";
+    const text = '<script>not executable</script>\n{"ok":true}\n';
+    await fs.writeFile(path.join(attachmentDir, "performance.log"), text);
+    const uploads = path.join(root, ".batty/uploads/1/smoke");
+    await fs.mkdir(uploads, { recursive: true });
+    await fs.writeFile(path.join(uploads, "source.ts"), "export const value = 'æøå';\n");
+    await fs.writeFile(path.join(uploads, "transport.ts"), Buffer.from([0, 255, 20]));
     await fs.writeFile(
       path.join(attachmentDir, "manifest.json"),
       JSON.stringify({
@@ -234,6 +241,14 @@ for (const baseUrl of ["/", "/batty"]) {
             size: original.length,
             mimeType: "image/jpeg",
             kind: "image",
+          },
+          {
+            id: textId,
+            name: "performance.log",
+            storedName: "performance.log",
+            size: Buffer.byteLength(text),
+            mimeType: "application/octet-stream",
+            kind: "file",
           },
         ],
       }),
@@ -255,6 +270,41 @@ for (const baseUrl of ["/", "/batty"]) {
       `attachment; filename*=UTF-8''${attachmentName}`,
     );
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), original);
+    const logRoute = attachmentRoute.replace(attachmentId, textId);
+    const sourceRoute = "/api/uploads/1/smoke/source.ts";
+    for (const [route, expected] of [
+      [logRoute, text],
+      [sourceRoute, "export const value = 'æøå';\n"],
+    ]) {
+      assert.equal((await get(`${route}?text=1`)).status, 401);
+      const textPreview = await get(`${route}?text=1`, { headers: { cookie } });
+      assert.equal(textPreview.status, 200);
+      assert.equal(textPreview.headers.get("content-type"), "text/plain; charset=utf-8");
+      assert.equal(textPreview.headers.get("x-content-type-options"), "nosniff");
+      assert.equal(await textPreview.text(), expected);
+      const originalText = await get(`${route}?download=1`, { headers: { cookie } });
+      assert.match(originalText.headers.get("content-disposition"), /^attachment;/);
+      assert.equal(await originalText.text(), expected);
+    }
+    assert.equal(
+      (await get("/api/uploads/1/smoke/transport.ts?text=1", { headers: { cookie } })).status,
+      415,
+    );
+    const catalogFiles = [];
+    let cursor;
+    do {
+      const query = new URLSearchParams({ limit: "1", ...(cursor ? { after: cursor } : {}) });
+      const page = await (await get(`/api/artifacts?${query}`, { headers: { cookie } })).json();
+      assert.equal(page.artifacts.length, 1);
+      catalogFiles.push(...page.artifacts.filter((item) => item.kind === "file"));
+      cursor = page.nextCursor;
+    } while (cursor);
+    for (const name of ["performance.log", "source.ts"])
+      assert.match(catalogFiles.find((item) => item.title === name).textPreviewUrl, /\?text=1$/);
+    assert.equal(
+      catalogFiles.find((item) => item.title === "transport.ts").textPreviewUrl,
+      undefined,
+    );
     await assert.rejects(call("browser.state", { browserId: id }));
     assert.deepEqual(await call("cron.running"), []);
     assert.deepEqual(await call("push.ack", { clientId: id, challengeId: id }), { ok: false });

@@ -7,6 +7,7 @@ import { FolderTree, Search, GitBranch } from "@lucide/vue";
 import WorkspaceFileSearch from "./WorkspaceFileSearch.vue";
 import FullPopover from "./FullPopover.vue";
 import { getWorkspaceFile, getWorkspaceFiles, getWorkspaceGit } from "@/client/lib/api";
+import { mountCodeView } from "@/client/lib/code-view";
 import type { WorkspaceInfo } from "@/shared/types";
 
 const props = defineProps<{ popoverId: string; workspace?: WorkspaceInfo }>();
@@ -154,18 +155,7 @@ async function open(): Promise<void> {
     });
     tree.render({ fileTreeContainer: treeRoot.value });
     unsubscribe = tree.subscribe(loadExpandedDirectories);
-    code = new diffs.CodeView({
-      theme: { dark: "pierre-dark", light: "pierre-light" },
-      themeType: "system",
-      overflow: "wrap",
-      disableFileHeader: true,
-      layout: { paddingTop: 12, paddingBottom: 12, gap: 0 },
-      unsafeCSS: `
-        :host { --diffs-font-family: var(--font-family-mono); }
-        [data-line], [data-line] span { font-weight: 400; }
-      `,
-    });
-    code.setup(codeRoot.value);
+    code = mountCodeView(diffs.CodeView, codeRoot.value);
     searchActive.value = true;
     await loadDirectory("", currentGeneration);
   } catch (cause) {

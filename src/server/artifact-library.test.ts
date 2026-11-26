@@ -71,6 +71,7 @@ test("projects committed file snapshots, legacy uploads and living local sites",
       baseUrl,
     );
     const live = await createSite(sitesDir, baseUrl, "Live site");
+    await fs.writeFile(path.join(live.directory, "index.html"), "<h1>Live</h1>");
     const library = new ArtifactLibrary(config);
     const items = await library.list();
     expect(items.map(({ title }) => title).sort()).toEqual([
@@ -132,6 +133,83 @@ test("projects committed file snapshots, legacy uploads and living local sites",
   }
 });
 
+test("lists internal output and ready sites without changing refs or stars", async () => {
+  const config = await fixture();
+  try {
+    const source = path.join(config.battyDir, "perf.log");
+    const save = async (toolCallId: string, value: string) => {
+      await fs.writeFile(source, value);
+      const [file] = await storeSentFiles({
+        rootDir: config.sentFilesDir,
+        workspaceId: "work",
+        sessionId: "99",
+        toolCallId,
+        cwd: config.battyDir,
+        paths: [source],
+      });
+      return file!;
+    };
+    const internal = await save("benchmark", "other");
+    const first = await save("selected-first", "same!");
+    await save("selected-twin", "same!");
+    const distinct = await save("other-copy", "saved");
+    const draft = await createSite(config.sitesDir, config.baseUrl, "Weekly report");
+    const ready = await createSite(config.sitesDir, config.baseUrl, "Weekly report");
+    const distinctSite = await createSite(config.sitesDir, config.baseUrl, "Weekly report");
+    await fs.writeFile(path.join(ready.directory, "index.html"), "<h1>First</h1>");
+    await fs.writeFile(path.join(distinctSite.directory, "index.html"), "<h1>Second</h1>");
+    const index = path.join(draft.directory, "index.html");
+    const broken = await createSite(config.sitesDir, config.baseUrl, "Outside site");
+    await fs.symlink(source, path.join(broken.directory, "index.html"), "file");
+    await fs.writeFile(index, "");
+    const library = new ArtifactLibrary(config);
+    const starredRef = fileLibraryRef(first.id);
+    await fs.writeFile(
+      path.join(stateDirPath(config.battyDir), "artifact-stars.json"),
+      JSON.stringify([starredRef]),
+    );
+    const rows = await library.list();
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toMatchObject({ starred: true, title: "perf.log" });
+    expect(rows.map(({ ref }) => ref)).toEqual(
+      expect.arrayContaining([fileLibraryRef(distinct.id), fileLibraryRef(internal.id)]),
+    );
+    expect(
+      rows
+        .filter(({ kind }) => kind === "site")
+        .map(({ ref }) => ref)
+        .sort(),
+    ).toEqual(
+      [siteLibraryRef(ready.descriptor.id), siteLibraryRef(distinctSite.descriptor.id)].sort(),
+    );
+    expect(
+      (await library.setStar(rows[0]!.ref, false, 50)).artifacts.some(({ starred }) => starred),
+    ).toBe(false);
+    const internalRef = fileLibraryRef(internal.id);
+    expect(
+      (await library.resolve([internalRef, starredRef, siteLibraryRef(draft.descriptor.id)])).map(
+        ({ ref }) => ref,
+      ),
+    ).toEqual([internalRef, starredRef, siteLibraryRef(draft.descriptor.id)]);
+    expect(await fs.readFile((await library.resolveFileSource(internalRef)).path, "utf8")).toBe(
+      "other",
+    );
+    expect((await library.setStar(internalRef, true, 50)).artifacts[0]).toMatchObject({
+      ref: internalRef,
+      starred: true,
+    });
+    expect(
+      (await library.setStar(internalRef, false, 50)).artifacts.some(
+        ({ ref }) => ref === internalRef,
+      ),
+    ).toBe(true);
+    await fs.writeFile(index, "<h1>Ready</h1>");
+    expect((await library.list()).filter(({ kind }) => kind === "site")).toHaveLength(3);
+  } finally {
+    await fs.rm(config.battyDir, { recursive: true, force: true });
+  }
+});
+
 test("new preview caches are not artifacts and ambiguous legacy filenames are preserved", async () => {
   const config = await fixture();
   try {
@@ -179,9 +257,14 @@ test("new preview caches are not artifacts and ambiguous legacy filenames are pr
 test("routes persist concurrent star changes, prefer starred rows and reject unknown refs", async () => {
   const config = await fixture();
   const app = fastify();
+  app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) =>
+    reply.code(error.statusCode ?? 500).send({ error: error.message }),
+  );
   try {
     const first = await createSite(config.sitesDir, config.baseUrl, "First");
     const newer = await createSite(config.sitesDir, config.baseUrl, "Newer");
+    for (const site of [first, newer])
+      await fs.writeFile(path.join(site.directory, "index.html"), "<h1>Site</h1>");
     const batch = path.join(config.uploadsDir, "1", "batch");
     await fs.mkdir(batch, { recursive: true });
     const newest = path.join(batch, "New.txt");
@@ -212,6 +295,22 @@ test("routes persist concurrent star changes, prefer starred rows and reject unk
     const firstRef = siteLibraryRef(first.descriptor.id);
     const newerRef = siteLibraryRef(newer.descriptor.id);
     expect(catalog.json<ArtifactLibraryResponse>().artifacts[0]?.title).toBe("New.txt");
+    const head = (
+      await app.inject({ url: "/api/artifacts?limit=1", headers })
+    ).json<ArtifactLibraryResponse>();
+    expect(head.artifacts.map(({ title }) => title)).toEqual(["New.txt"]);
+    const tail = (
+      await app.inject({
+        url: "/api/artifacts",
+        query: { after: head.nextCursor!, limit: "2" },
+        headers,
+      })
+    ).json<ArtifactLibraryResponse>();
+    expect(tail.artifacts.map(({ ref }) => ref).sort()).toEqual([firstRef, newerRef].sort());
+    expect(tail.nextCursor).toBeUndefined();
+    expect((await app.inject({ url: "/api/artifacts?after=invalid", headers })).statusCode).toBe(
+      400,
+    );
 
     const marked = await Promise.all(
       [firstRef, newerRef].map((ref) =>
@@ -219,6 +318,13 @@ test("routes persist concurrent star changes, prefer starred rows and reject unk
       ),
     );
     for (const response of marked) expect(response.statusCode).toBe(200);
+    const stale = await app.inject({
+      url: "/api/artifacts",
+      query: { after: head.nextCursor! },
+      headers,
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toMatchObject({ code: "ARTIFACT_CATALOG_CHANGED" });
     const restarted = new ArtifactLibrary(config);
     const rows = await restarted.list();
     expect(new Set(rows.slice(0, 2).map(({ ref }) => ref))).toEqual(new Set([firstRef, newerRef]));

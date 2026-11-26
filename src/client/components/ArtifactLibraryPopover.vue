@@ -1,56 +1,203 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
-import type { ArtifactLibraryItem } from "@/shared/artifact-library";
-import { getArtifacts, setArtifactStar } from "@/client/lib/artifact-library";
+import { Virtualizer } from "virtua/vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import type { ArtifactLibraryItem, ArtifactLibraryResponse } from "@/shared/artifact-library";
+import {
+  ArtifactCatalogChanged,
+  getArtifacts,
+  setArtifactStar,
+} from "@/client/lib/artifact-library";
 import FullPopover from "./FullPopover.vue";
 import ArtifactLibraryRow from "./ArtifactLibraryRow.vue";
 import LoadingIndicator from "./LoadingIndicator.vue";
 
 const props = defineProps<{ popoverId: string }>();
-const artifacts = ref<ArtifactLibraryItem[]>([]);
-const loading = ref(false);
+const artifacts = shallowRef<ArtifactLibraryItem[]>([]);
+const viewport = ref<HTMLElement>();
+const pageEnd = ref<HTMLElement>();
+const nextCursor = ref<string>();
+const pageRequest = shallowRef<AbortController>();
+const open = ref(false);
 const saving = ref(false);
 const error = ref("");
-const sorted = computed(() =>
-  artifacts.value.toSorted(
-    (a, b) =>
-      Number(b.starred) - Number(a.starred) || Date.parse(b.createdAt) - Date.parse(a.createdAt),
-  ),
+const pageError = ref("");
+const focusedRef = ref<string>();
+const previewRef = ref<string>();
+const deferredPage = shallowRef<{ page: ArtifactLibraryResponse; fromStar: boolean }>();
+
+const keptRows = computed(() =>
+  [...new Set([focusedRef.value, previewRef.value].filter(Boolean))]
+    .map((ref) => artifacts.value.findIndex((item) => item.ref === ref))
+    .filter((index) => index !== -1),
 );
 
-async function loadArtifacts(): Promise<void> {
-  if (loading.value || saving.value) return;
-  loading.value = true;
-  error.value = "";
+function rowAttributes({ item }: { item: ArtifactLibraryItem }) {
+  return { "data-artifact-ref": item.ref };
+}
+
+function rememberFocus(target: EventTarget | null): void {
+  focusedRef.value = (target as HTMLElement | null)?.closest<HTMLElement>(
+    "[data-artifact-ref]",
+  )?.dataset.artifactRef;
+}
+
+function handlePreviewToggle(event: ToggleEvent): void {
+  const popover = event.target as HTMLElement;
+  if (!open.value || !popover.id) return;
+  const trigger = viewport.value?.querySelector<HTMLButtonElement>(
+    `button[popovertarget="${CSS.escape(popover.id)}"]`,
+  );
+  const itemRef = trigger?.closest<HTMLElement>("[data-artifact-ref]")?.dataset.artifactRef;
+  if (!trigger || !itemRef) return;
+  if (event.newState === "open") {
+    previewRef.value = itemRef;
+    return;
+  }
+  requestAnimationFrame(() => {
+    if (previewRef.value !== itemRef || popover.matches(":popover-open")) return;
+    const active = document.activeElement;
+    if (
+      viewport.value?.closest(":popover-open") &&
+      (active === document.body ||
+        active === viewport.value ||
+        active === trigger ||
+        popover.contains(active))
+    ) {
+      trigger.focus();
+      trigger.scrollIntoView({ block: "nearest" });
+    }
+    previewRef.value = undefined;
+  });
+}
+
+function cancelPageRequest(): void {
+  pageRequest.value?.abort();
+  pageRequest.value = undefined;
+}
+
+function appendPage(page: ArtifactLibraryResponse): void {
+  const present = new Set(artifacts.value.map((item) => item.ref));
+  artifacts.value = [
+    ...artifacts.value,
+    ...page.artifacts.filter((item) => !present.has(item.ref)),
+  ];
+  nextCursor.value = page.nextCursor;
+}
+
+async function loadPage(after?: string, refresh = false): Promise<void> {
+  if (pageRequest.value || saving.value || deferredPage.value) return;
+  const request = new AbortController();
+  pageRequest.value = request;
+  pageError.value = "";
   try {
-    artifacts.value = (await getArtifacts()).artifacts;
+    const page = await getArtifacts(after, request.signal);
+    if (request.signal.aborted || saving.value) return;
+    if (after !== undefined) appendPage(page);
+    else if (refresh) await replaceFirstPage(page, false);
+    else {
+      artifacts.value = page.artifacts;
+      nextCursor.value = page.nextCursor;
+    }
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
+    if (request.signal.aborted || saving.value) return;
+    if (after !== undefined && cause instanceof ArtifactCatalogChanged) {
+      pageRequest.value = undefined;
+      void loadPage(undefined, true);
+      return;
+    }
+    const message = cause instanceof Error ? cause.message : String(cause);
+    if (after !== undefined || refresh) pageError.value = message;
+    else error.value = message;
   } finally {
-    loading.value = false;
+    if (pageRequest.value === request) pageRequest.value = undefined;
   }
 }
 
+watch(
+  [viewport, pageEnd, nextCursor, open, saving, pageError, deferredPage],
+  ([root, end, cursor, isOpen, isSaving, failure, deferred], _previous, onCleanup) => {
+    if (!root || !end || cursor === undefined || !isOpen || isSaving || failure || deferred) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting && nextCursor.value === cursor && open.value)
+          void loadPage(cursor);
+      },
+      { root },
+    );
+    observer.observe(end);
+    onCleanup(() => observer.disconnect());
+  },
+  { flush: "post" },
+);
+
 function handleToggle(event: Event): void {
-  if ((event as ToggleEvent).newState === "open") void loadArtifacts();
+  open.value = (event as ToggleEvent).newState === "open";
+  if (!open.value) {
+    cancelPageRequest();
+    previewRef.value = undefined;
+    return;
+  }
+  if (saving.value) return;
+  artifacts.value = [];
+  nextCursor.value = undefined;
+  error.value = "";
+  void loadPage();
 }
 
-async function toggleStar(item: ArtifactLibraryItem, button: HTMLButtonElement): Promise<void> {
+function retryNextPage(): void {
+  viewport.value?.focus({ preventScroll: true });
+  void loadPage(nextCursor.value);
+}
+
+async function replaceFirstPage(page: ArtifactLibraryResponse, fromStar: boolean): Promise<void> {
+  if (previewRef.value) {
+    deferredPage.value = { page, fromStar };
+    return;
+  }
+  const active = document.activeElement;
+  const activeRow = focusedRef.value;
+  artifacts.value = page.artifacts;
+  nextCursor.value = page.nextCursor;
+  pageError.value = "";
+  await nextTick();
+  if (open.value) {
+    if (activeRow && active instanceof HTMLElement && active.isConnected) {
+      active.focus();
+      active.scrollIntoView({ block: "nearest" });
+    } else {
+      if (activeRow) viewport.value?.focus({ preventScroll: true });
+      viewport.value?.scrollTo(0, 0);
+    }
+  }
+  if (fromStar) saving.value = false;
+}
+
+watch(previewRef, (activePreview) => {
+  if (activePreview || !deferredPage.value) return;
+  const { page, fromStar } = deferredPage.value;
+  deferredPage.value = undefined;
+  void replaceFirstPage(page, fromStar);
+});
+
+async function toggleStar(item: ArtifactLibraryItem): Promise<void> {
   if (saving.value) return;
   saving.value = true;
   error.value = "";
   try {
-    const result = await setArtifactStar(item.ref, !item.starred);
-    const hadFocus = button === document.activeElement;
-    artifacts.value = result.artifacts;
-    await nextTick();
-    if (hadFocus && document.activeElement === document.body) button.focus();
+    const page = await setArtifactStar(item.ref, !item.starred);
+    cancelPageRequest();
+    await replaceFirstPage(page, true);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
-  } finally {
     saving.value = false;
   }
 }
+
+onMounted(() => document.addEventListener("beforetoggle", handlePreviewToggle, true));
+onBeforeUnmount(() => {
+  cancelPageRequest();
+  document.removeEventListener("beforetoggle", handlePreviewToggle, true);
+});
 </script>
 
 <template>
@@ -63,37 +210,71 @@ async function toggleStar(item: ArtifactLibraryItem, button: HTMLButtonElement):
     @toggle="handleToggle"
   >
     <div class="artifact-library">
-      <div v-if="loading" class="artifact-library__status">
-        <LoadingIndicator label="Loading artifacts" />
-      </div>
       <p v-if="error" class="artifact-library__status artifact-library__error" role="alert">
         {{ error }}
       </p>
-      <ul
-        v-if="!loading && sorted.length"
-        class="artifact-library__list"
-        role="list"
-        aria-label="Artifacts"
+      <div
+        ref="viewport"
+        class="artifact-library__viewport"
+        tabindex="0"
+        role="region"
+        aria-label="Artifact list"
+        @focusin="rememberFocus($event.target)"
+        @focusout="rememberFocus($event.relatedTarget)"
       >
-        <ArtifactLibraryRow
-          v-for="item in sorted"
-          :key="item.ref"
-          :item="item"
-          :saving="saving"
-          @star="toggleStar(item, $event)"
-        />
-      </ul>
-      <p v-else-if="!loading && !error" class="artifact-library__status">No artifacts yet.</p>
+        <Virtualizer
+          v-if="artifacts.length"
+          as="ul"
+          item="li"
+          class="artifact-library__list"
+          role="list"
+          aria-label="Artifacts"
+          :data="artifacts"
+          :item-props="rowAttributes"
+          :keep-mounted="keptRows"
+          :scroll-ref="viewport"
+        >
+          <template #default="{ item }">
+            <ArtifactLibraryRow
+              :key="item.ref"
+              :item="item"
+              :saving="saving"
+              @star="toggleStar(item)"
+            />
+          </template>
+        </Virtualizer>
+        <div v-else-if="pageRequest" class="artifact-library__status">
+          <LoadingIndicator label="Loading artifacts" />
+        </div>
+        <p v-else-if="open && !error" class="artifact-library__status">No artifacts yet.</p>
+        <div v-if="nextCursor !== undefined" ref="pageEnd" class="artifact-library__page-end">
+          <div v-if="pageError" class="artifact-library__status">
+            <p class="artifact-library__error" role="alert">{{ pageError }}</p>
+            <button class="chrome-button" type="button" @click="retryNextPage">Retry</button>
+          </div>
+          <div v-else-if="pageRequest" class="artifact-library__status">
+            <LoadingIndicator label="Loading more artifacts" />
+          </div>
+        </div>
+      </div>
     </div>
   </FullPopover>
 </template>
 
 <style scoped>
 .artifact-library {
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   background: var(--color-bg-app);
+}
+
+.artifact-library__viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
 }
 
 .artifact-library__list {
@@ -101,6 +282,10 @@ async function toggleStar(item: ArtifactLibraryItem, button: HTMLButtonElement):
   margin: 0 auto;
   padding: 0;
   list-style: none;
+}
+
+.artifact-library__page-end {
+  min-height: 1px;
 }
 
 .artifact-library__status {

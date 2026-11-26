@@ -9,8 +9,12 @@ import { expect, test } from "vite-plus/test";
 import type { AppConfig } from "@/server/config";
 import type { Runtime } from "@/server/runtime";
 import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
-import { fixtureOperation, setFixtureRpcHandler } from "../test/socket-fixture";
-import { createSite } from "@/server/sites";
+import {
+  fixtureOperation,
+  setFixtureRpcHandler,
+  waitForFixtureOperation,
+} from "../test/socket-fixture";
+import { createSite, getSite } from "@/server/sites";
 import { registerSiteRoutes } from "@/server/routes/sites";
 import { registerSiteFunction } from "@/server/site-functions";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
@@ -91,7 +95,12 @@ test("sandboxed nested site previews call functions and reject stale-document re
     await page.goto(
       `${origin}${fixture}?${new URLSearchParams({ base: baseUrl, id: site.descriptor.id })}`,
     );
+    const siteRead = waitForFixtureOperation(
+      server,
+      (operation, input) => operation === "site.get" && input.siteId === site.descriptor.id,
+    );
     await page.getByRole("button", { name: "Open site", exact: true }).click();
+    expect((await siteRead).value).toEqual(site.descriptor);
     const frame = page.frameLocator("iframe");
     await frame.getByAltText("Fixture image").waitFor({ state: "visible" });
     await expect
@@ -108,6 +117,15 @@ test("sandboxed nested site previews call functions and reject stale-document re
     expect(new URL(frameUrl).pathname).toBe(site.browserUrl);
     const imageUrl = await frame.getByAltText("Fixture image").getAttribute("src");
     expect(new URL(imageUrl!, frameUrl).pathname).toBe(`${site.browserUrl}photo.svg`);
+
+    const visibility = page.getByRole("switch", { name: "Public" });
+    await visibility.click();
+    await expect.poll(() => visibility.isChecked()).toBe(true);
+    expect((await getSite(sitesDir, baseUrl, site.descriptor.id)).descriptor.public).toBe(true);
+    await visibility.click();
+    await expect.poll(() => visibility.isChecked()).toBe(false);
+    expect((await getSite(sitesDir, baseUrl, site.descriptor.id)).descriptor.public).toBe(false);
+
     await frame.getByRole("button", { name: "Generate" }).click();
     await expect
       .poll(() => frame.locator("output").textContent(), { timeout: 10000 })

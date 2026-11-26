@@ -23,8 +23,9 @@ import {
   SitesToolSchema,
   WebSearchToolSchema,
 } from "./tool-schemas";
+import { INLINE_TEXT_MAX_BYTES } from "./text-output-limits";
+
 const TOOL_OUTPUT_MAX_LINES = 2_000;
-const TOOL_OUTPUT_MAX_BYTES = 50 * 1024;
 
 interface SpillableToolOutput {
   text: string;
@@ -108,7 +109,7 @@ export async function spillToolOutputToTempFile(
   const direction = TOOL_OUTPUT_TRUNCATION_DIRECTIONS[toolName];
   const lineCount = countLines(output.text);
   const byteCount = Buffer.byteLength(output.text, "utf8");
-  if (lineCount <= TOOL_OUTPUT_MAX_LINES && byteCount <= TOOL_OUTPUT_MAX_BYTES) {
+  if (lineCount <= TOOL_OUTPUT_MAX_LINES && byteCount <= INLINE_TEXT_MAX_BYTES) {
     return output;
   }
 
@@ -119,11 +120,11 @@ export async function spillToolOutputToTempFile(
   const truncatedText = truncateText(
     output.text,
     TOOL_OUTPUT_MAX_LINES,
-    TOOL_OUTPUT_MAX_BYTES,
+    INLINE_TEXT_MAX_BYTES,
     direction,
   );
   const message = [
-    `Output exceeded ${TOOL_OUTPUT_MAX_LINES} lines or ${TOOL_OUTPUT_MAX_BYTES} bytes.`,
+    `Output exceeded ${TOOL_OUTPUT_MAX_LINES} lines or ${INLINE_TEXT_MAX_BYTES} bytes.`,
     `Showing the ${direction === "head" ? "first" : "last"} ${countLines(truncatedText)} lines / ${Buffer.byteLength(truncatedText, "utf8")} bytes.`,
     `Full output saved to: ${filePath}`,
     "Use the read tool on that path if you need more.",

@@ -165,6 +165,7 @@ export async function* storedSentFiles(rootDir: string, baseUrl: string, fileId?
             yield {
               file: toDescriptor(baseUrl, workspaceId, sessionId, toolCallId, file),
               createdAt: manifest.createdAt,
+              storedPath: path.join(call, file.storedName),
               location: { workspaceId, sessionId, toolCallId, fileId: file.id },
             };
           }

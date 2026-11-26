@@ -22,6 +22,7 @@ import { registerDraftRoutes } from "./routes/drafts";
 import { registerSiteRoutes } from "./routes/sites";
 import { registerArtifactRoutes } from "./routes/artifacts";
 import { ArtifactLibrary } from "./artifact-library";
+import { sendArtifactText } from "./artifact-text";
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
 import { cloudBrowserAvailable, registerCloudBrowserLauncher } from "./cloud-browser-launcher";
 import { Runtime, context } from "./runtime";
@@ -211,7 +212,7 @@ app.get<{ Params: { imageId: string }; Querystring: { preview?: string } }>(
 );
 app.get<{
   Params: { sessionId: string; batchId: string; name: string };
-  Querystring: { preview?: string; download?: string };
+  Querystring: { preview?: string; download?: string; text?: string };
 }>("/api/uploads/:sessionId/:batchId/:name", async (request, reply) => {
   const file = await resolveUploadedFile(
     config.uploadsDir,
@@ -219,6 +220,12 @@ app.get<{
     request.params.batchId,
     request.params.name,
   );
+  if (request.query.text === "1")
+    return sendArtifactText(
+      reply,
+      { name: request.params.name, mimeType: file.mimeType },
+      file.path,
+    );
   if (request.query.download === "1") {
     return reply
       .header(
@@ -238,13 +245,14 @@ app.get<{
 });
 app.get<{
   Params: { workspaceId: string; sessionId: string; toolCallId: string; fileId: string };
-  Querystring: { download?: string; preview?: string };
+  Querystring: { download?: string; preview?: string; text?: string };
 }>("/api/sent-files/:workspaceId/:sessionId/:toolCallId/:fileId", async (request, reply) => {
   const file = await resolveSentFile({
     rootDir: config.sentFilesDir,
     baseUrl: config.baseUrl,
     ...request.params,
   });
+  if (request.query.text === "1") return sendArtifactText(reply, file.descriptor, file.storedPath);
   if (request.query.preview === "1" && file.descriptor.kind === "image")
     return reply
       .type("image/webp")

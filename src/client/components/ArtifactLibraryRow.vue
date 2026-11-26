@@ -3,6 +3,7 @@ import { Download, File, Globe, Image, Star } from "@lucide/vue";
 import { computed, useId } from "vue";
 import type { ArtifactLibraryItem } from "@/shared/artifact-library";
 import { imageViewerUrl } from "@/client/lib/file-preview";
+import ArtifactTextPopover from "./ArtifactTextPopover.vue";
 import AttachedFileDownload from "./AttachedFileDownload.vue";
 import ImagePopover from "./ImagePopover.vue";
 import SitePopover from "./SitePopover.vue";
@@ -15,6 +16,10 @@ const imageUrl = computed(() => {
   if (item.kind === "file" && item.file.kind === "image" && item.file.previewUrl)
     return imageViewerUrl(item.file, item.file.previewUrl);
 });
+const textPreviewUrl = computed(() =>
+  props.item.kind === "file" ? props.item.textPreviewUrl : undefined,
+);
+const icon = computed(() => (props.item.kind === "site" ? Globe : imageUrl.value ? Image : File));
 const metadata = computed(() => {
   const kind =
     props.item.kind === "site" ? "Site" : props.item.source === "upload" ? "Upload" : "File";
@@ -27,14 +32,14 @@ const metadata = computed(() => {
 </script>
 
 <template>
-  <li class="artifact-row">
+  <div class="artifact-row">
     <button
-      v-if="props.item.kind === 'site' || imageUrl"
+      v-if="props.item.kind === 'site' || imageUrl || textPreviewUrl"
       type="button"
       class="artifact-row__action"
       :popovertarget="previewId"
     >
-      <component :is="props.item.kind === 'site' ? Globe : Image" :size="19" aria-hidden="true" />
+      <component :is="icon" :size="19" aria-hidden="true" />
       <span>
         <strong>{{ props.item.title }}</strong>
         <small>{{ metadata }}</small>
@@ -85,7 +90,13 @@ const metadata = computed(() => {
         </AttachedFileDownload>
       </template>
     </ImagePopover>
-  </li>
+    <ArtifactTextPopover
+      v-else-if="props.item.kind === 'file' && textPreviewUrl"
+      :popover-id="previewId"
+      :file="props.item.file"
+      :preview-url="textPreviewUrl"
+    />
+  </div>
 </template>
 
 <style scoped>
@@ -114,10 +125,6 @@ const metadata = computed(() => {
   text-align: left;
   text-decoration: none;
   cursor: pointer;
-}
-
-.artifact-row :deep(.artifact-row__action:hover) {
-  background: var(--color-chrome-hover);
 }
 
 .artifact-row :deep(.artifact-row__action:focus-visible) {
@@ -149,7 +156,15 @@ const metadata = computed(() => {
 }
 
 .artifact-row__star[aria-pressed="true"] {
+  --chrome-button-active: transparent;
   color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .artifact-row :deep(.artifact-row__action:hover),
+  .artifact-row__star[aria-pressed="true"]:hover {
+    background: var(--color-chrome-hover);
+  }
 }
 
 .artifact-row__star[aria-pressed="true"] svg {

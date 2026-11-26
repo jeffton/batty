@@ -29,7 +29,7 @@ import { changeAssistantWorkspace } from "./assistant-settings";
 import { workspaceBrowserKey } from "./browser-service";
 import { CloudBrowserControlSchema } from "./browser-schemas";
 import { CloudBrowserCredentialsSchema } from "./cloud-browser-credentials-schema";
-import { setSitePublic } from "./sites";
+import { getSite, setSitePublic } from "./sites";
 import { executeSiteFunction } from "./site-functions";
 import type { BrowserErrorReport } from "../shared/browser-errors";
 import type { CronJob, CronRun } from "./orchestration";
@@ -339,6 +339,11 @@ export function createOwnerRpcHandler(runtime: Runtime, services: OwnerRpcServic
   add("push.ack", ({ clientId, challengeId }) => ({
     ok: webPush.foreground.acknowledge(clientId, challengeId),
   }));
+  add("site.get", async ({ siteId }) => {
+    if (typeof siteId !== "string") badInput("siteId must be a string");
+    const { descriptor } = await getSite(config.sitesDir, config.baseUrl, siteId);
+    return descriptor;
+  });
   add("site.public", ({ siteId, public: isPublic }) => {
     if (typeof isPublic !== "boolean") badInput("public must be a boolean");
     return setSitePublic(config.sitesDir, config.baseUrl, siteId, isPublic);

@@ -105,8 +105,10 @@ export async function* storedUploadedFiles(uploadsDir: string, baseUrl: string, 
         const id = uploadedFileId(sessionId, batchId, name);
         if (fileId !== undefined && id !== fileId) continue;
         try {
-          const stats = await fs.stat(path.join(batch, name));
+          const storedPath = path.join(batch, name);
+          const stats = await fs.stat(storedPath);
           yield {
+            storedPath,
             file: uploadedFileDescriptor(id, baseUrl, sessionId, batchId, name, stats.size),
             createdAt: stats.mtimeMs,
             location: { sessionId, batchId, storedName: name },

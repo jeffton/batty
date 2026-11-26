@@ -88,6 +88,7 @@ export interface OwnerInputs {
   "push.save": { subscription: PushSubscriptionJSON };
   "push.delete": { endpoint: string };
   "push.ack": { clientId: string; challengeId: string };
+  "site.get": { siteId: string };
   "site.public": { siteId: string; public: boolean };
   "site.call": { siteId: string; name: string; input: unknown };
   "browser.open": { workspaceId: string };
@@ -191,6 +192,7 @@ export interface OwnerOutputs {
   "push.save": { ok: true };
   "push.delete": { ok: true };
   "push.ack": { ok: boolean };
+  "site.get": Ui.SiteDescriptor;
   "site.public": Ui.SiteDescriptor;
   "site.call": unknown;
   "browser.open": Ui.BrowserDescriptor;

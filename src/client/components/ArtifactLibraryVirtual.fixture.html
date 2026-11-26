@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h } from "vue";
+      import ArtifactLibraryPopover from "./ArtifactLibraryPopover.vue";
+      import "../styles.css";
+
+      window.__BATTY_BASE_URL__ = "/nested/app";
+      createApp({
+        render: () => [
+          h("button", { popovertarget: "artifact-list" }, "Artifacts"),
+          h(ArtifactLibraryPopover, { popoverId: "artifact-list" }),
+        ],
+      }).mount("#app");
+    </script>
+  </body>
+</html>

@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h } from "vue";
+      import ChatMessage from "./ChatMessage.vue";
+      import "../styles.css";
+
+      const file = (name, mimeType, downloadUrl) => ({
+        id: name,
+        name,
+        size: 64,
+        kind: "file",
+        mimeType,
+        downloadUrl,
+      });
+      const upload = file("upload.log", "text/plain", "/api/uploads/1/batch/upload.log?download=1");
+      const report = file(
+        "report.txt",
+        "text/plain",
+        "/api/sent-files/work/2/tool/report?download=1",
+      );
+      const binary = file(
+        "binary.log",
+        "text/plain",
+        "/api/sent-files/work/2/tool/binary?download=1",
+      );
+      const output = file(
+        "output.ts",
+        "text/typescript",
+        "/api/sent-files/work/1/tool/output?download=1",
+      );
+      const timestamp = Date.now();
+      const messages = [
+        { id: "user", role: "user", timestamp, blocks: [{ type: "attachment", file: upload }] },
+        {
+          id: "report",
+          role: "custom",
+          customType: "batty-runtime-notice:subagent",
+          timestamp,
+          text: "Worker report",
+          data: { runtimePresentation: { sentFiles: [report, binary] } },
+        },
+        {
+          id: "reply",
+          role: "assistant",
+          turnPhase: "final",
+          timestamp,
+          blocks: [{ type: "text", text: "Generated source" }],
+          sentFiles: [output],
+        },
+      ];
+
+      createApp({ render: () => messages.map((message) => h(ChatMessage, { message })) }).mount(
+        "#app",
+      );
+    </script>
+  </body>
+</html>

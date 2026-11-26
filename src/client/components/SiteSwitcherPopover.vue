@@ -132,7 +132,7 @@ onBeforeUnmount(() => {
         ref="chooser"
         anchor-down
         align-viewport-right
-        :boundary-id="props.popoverId"
+        :boundary-id="`${props.popoverId}-body`"
         class="chooser-popover"
         @toggle="handleChooserToggle"
         @keydown.esc.stop.prevent="closeChooser"
@@ -182,7 +182,6 @@ onBeforeUnmount(() => {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-
 .site-switcher__status {
   display: flex;
   justify-content: center;

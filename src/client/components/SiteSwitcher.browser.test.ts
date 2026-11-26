@@ -210,6 +210,11 @@ test.each([
       }
       await activate(launcher);
       await frame.getByRole("heading", { name: names[0] }).waitFor();
+      const sheet = (await switcher.boundingBox())!;
+      expect(sheet.x).toBe(0);
+      expect(sheet.width).toBe(page.viewportSize()!.width);
+      expect(sheet.y).toBeGreaterThan(0);
+      expect(sheet.y + sheet.height).toBe(page.viewportSize()!.height);
       await expect.poll(() => state.opened).toEqual([recent[0]!.id]);
       expect(await trigger.locator("svg").getAttribute("class")).toContain("lucide-square-stack");
       expect(await switcher.locator("iframe").getAttribute("sandbox")).not.toContain(

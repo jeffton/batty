@@ -96,11 +96,12 @@ function finishPageGesture(event: PointerEvent): void {
 
 function resizeView(): void {
   const visual = window.visualViewport;
-  viewStyle.value = {
-    top: `calc(${visual?.offsetTop ?? 0}px + var(--safe-area-top) + 0.5rem)`,
-    bottom: "auto",
-    height: `calc(${visual?.height ?? window.innerHeight}px - var(--safe-area-top) - var(--safe-area-bottom) - 1rem)`,
-  };
+  viewStyle.value = visual
+    ? {
+        "--full-popover-viewport-top": `${visual.offsetTop}px`,
+        "--full-popover-viewport-bottom": `${window.innerHeight - visual.offsetTop - visual.height}px`,
+      }
+    : {};
 }
 let viewportFits = Promise.resolve();
 function fitViewport(): Promise<void> {
@@ -247,7 +248,7 @@ onBeforeUnmount(() => {
           :id="`${popoverId}-tabs`"
           ref="tabs"
           anchor-down
-          :boundary-id="popoverId"
+          :boundary-id="`${popoverId}-body`"
           class="cloud-browser-tabs"
         >
           <button type="button" class="cloud-browser-tabs__new" @click="newTab">
@@ -459,10 +460,6 @@ onBeforeUnmount(() => {
 }
 .cloud-browser-tabs__label small {
   color: var(--color-text-muted);
-}
-.browser-popover :deep(.full-popover__header) {
-  padding: 0.4rem;
-  gap: 0.4rem;
 }
 .cloud-browser {
   position: relative;

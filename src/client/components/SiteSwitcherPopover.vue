@@ -88,7 +88,7 @@ onBeforeUnmount(() => request?.abort());
         :id="`${props.popoverId}-chooser`"
         ref="chooser"
         anchor-down
-        :boundary-id="props.popoverId"
+        :boundary-id="`${props.popoverId}-body`"
         class="site-chooser"
         @toggle="choosing = ($event as ToggleEvent).newState === 'open'"
         @keydown.esc.stop.prevent="closeChooser"
@@ -176,7 +176,6 @@ onBeforeUnmount(() => request?.abort());
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
 }
-
 .site-switcher__status {
   display: flex;
   justify-content: center;

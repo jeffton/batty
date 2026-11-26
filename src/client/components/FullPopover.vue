@@ -81,7 +81,7 @@ onBeforeUnmount(removeFromStack);
         <slot name="header-content" />
       </div>
     </header>
-    <div class="full-popover__body">
+    <div :id="`${props.popoverId}-body`" class="full-popover__body">
       <slot />
     </div>
   </BasePopover>
@@ -89,17 +89,20 @@ onBeforeUnmount(removeFromStack);
 
 <style scoped>
 :global(.full-popover) {
-  inset: calc(var(--safe-area-top) + 1rem + var(--full-popover-stack-offset))
-    calc(var(--safe-area-right) + 1rem) calc(var(--safe-area-bottom) + 1rem)
-    calc(var(--safe-area-left) + 1rem);
+  inset: calc(
+      var(--full-popover-viewport-top, 0px) + var(--safe-area-top) + 1rem +
+        var(--full-popover-stack-offset)
+    )
+    0 var(--full-popover-viewport-bottom, 0px);
   width: auto;
   max-width: none;
   height: auto;
   max-height: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--color-chrome-border);
-  border-radius: 1.1rem;
+  border: 0;
+  border-top: 1px solid var(--color-chrome-border);
+  border-radius: 1.1rem 1.1rem 0 0;
   background: var(--color-bg-panel);
   color: var(--color-text);
   box-shadow: var(--color-shadow-popover);
@@ -122,7 +125,9 @@ onBeforeUnmount(removeFromStack);
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.5rem 1rem;
-  padding: 0.65rem 1rem;
+  padding-block: 0.65rem;
+  padding-left: calc(var(--safe-area-left) + 1rem);
+  padding-right: calc(var(--safe-area-right) + 1rem);
   border-bottom: 1px solid var(--color-chrome-border);
   background: var(--color-bg-instance);
   box-shadow: var(--color-shadow-header);
@@ -172,6 +177,7 @@ onBeforeUnmount(removeFromStack);
 
 .full-popover__body {
   min-height: 0;
+  margin: 0 var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
   overflow: hidden;
 }
 </style>

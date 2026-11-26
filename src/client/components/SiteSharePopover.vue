@@ -103,7 +103,7 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
     :id="`${props.popoverId}-share`"
     ref="popover"
     anchor-down
-    :boundary-id="props.popoverId"
+    :boundary-id="`${props.popoverId}-body`"
     class="site-share"
     role="group"
     aria-label="Share site"

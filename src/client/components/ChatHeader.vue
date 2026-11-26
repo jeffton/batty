@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AppWindow, Wrench, Clock3, Globe } from "@lucide/vue";
+import { Newspaper, Wrench, Clock3, Globe } from "@lucide/vue";
 import { nextTick, ref } from "vue";
 import { openCloudBrowser } from "@/client/lib/api";
 import BrowserPopover from "./BrowserPopover.vue";
@@ -52,6 +52,15 @@ async function logout() {
         <img :src="withBaseUrl('/favicon.png')" alt="" />
       </button>
       <button
+        type="button"
+        class="header__button chrome-button chrome-button--icon"
+        popovertarget="site-switcher"
+        aria-label="Sites"
+        title="Sites"
+      >
+        <Newspaper :size="17" />
+      </button>
+      <button
         v-if="store.settings.cloudBrowserAvailable"
         type="button"
         class="header__button chrome-button chrome-button--icon"
@@ -80,15 +89,6 @@ async function logout() {
         title="Workspaces and tools"
       >
         <Wrench :size="17" />
-      </button>
-      <button
-        type="button"
-        class="header__button chrome-button chrome-button--icon"
-        popovertarget="site-switcher"
-        aria-label="Sites"
-        title="Sites"
-      >
-        <AppWindow :size="17" />
       </button>
     </div>
     <BrowserPopover

@@ -53,7 +53,7 @@ test("launcher opens returned browser, coalesces clicks, and displays startup er
     );
     expect(
       wrapper.findAll(".header__button").map((button) => button.attributes("aria-label")),
-    ).toEqual(["Settings", "Open browser", "Cron", "Workspaces and tools", "Sites"]);
+    ).toEqual(["Settings", "Sites", "Open browser", "Cron", "Workspaces and tools"]);
     const button = wrapper.get('[aria-label="Open browser"]');
     await button.trigger("click");
     await button.trigger("click");

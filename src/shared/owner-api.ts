@@ -4,7 +4,7 @@ import type { CloudBrowserState, CloudBrowserCredentialTarget } from "./cloud-br
 import type { MemoryTreeOverview, MemoryTreeExpansion } from "./memory-tree";
 import type { WorkspaceFilesResponse, WorkspaceFileSearchEvent } from "./workspace-files";
 
-export type SiteCatalog = { sites: Ui.SiteDescriptor[]; recentSiteIds: string[] };
+export type SiteCatalog = { sites: Ui.SiteDescriptor[] };
 export type VisitedSite = SiteCatalog & { site: Ui.SiteDescriptor };
 
 /** Native owner operations. Inputs are domain values, never HTTP envelopes. */

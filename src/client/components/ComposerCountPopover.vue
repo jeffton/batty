@@ -11,6 +11,7 @@ const props = withDefaults(
     dialogLabel?: string;
     triggerClass?: string;
     showTrigger?: boolean;
+    alignNarrowViewportLeft?: boolean;
   }>(),
   { showTrigger: true },
 );
@@ -47,6 +48,7 @@ defineExpose({ close: () => popover.value?.hidePopover() });
     floating
     anchor-up
     align-anchor-left
+    :align-narrow-viewport-left="alignNarrowViewportLeft"
     role="dialog"
     :aria-label="dialogLabel ?? label"
     @toggle="emit('toggle', $event)"

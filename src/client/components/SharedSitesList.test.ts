@@ -19,7 +19,7 @@ const site: SiteDescriptor = {
 };
 
 function opened(site: SiteDescriptor) {
-  return { site, sites: [site], recentSiteIds: [site.id] };
+  return { site, sites: [site] };
 }
 
 function mountSites(stored: SiteDescriptor, idPrefix = "") {
@@ -29,6 +29,8 @@ function mountSites(stored: SiteDescriptor, idPrefix = "") {
     global: {
       stubs: {
         SitePopover: false,
+        SiteSharePopover: false,
+        BasePopover: { name: "BasePopover", template: "<div><slot /></div>" },
         FullPopover: {
           name: "FullPopover",
           template: "<div><slot name='header-actions'/><slot/></div>",
@@ -64,7 +66,9 @@ test.each(["/", "/batty", "/nested/app"])(
         popover.vm.$emit("toggle", { newState: "open" });
         await wrapper.vm.$nextTick();
         expect(wrapper.get("iframe").attributes("src")).toBe(`${url}?batty_preview=1`);
-        await wrapper.get('[aria-label="Copy site URL"]').trigger("click");
+        wrapper.getComponent({ name: "BasePopover" }).vm.$emit("toggle", { newState: "open" });
+        await wrapper.vm.$nextTick();
+        await wrapper.get(".site-share__copy").trigger("click");
         expect(writeText).toHaveBeenLastCalledWith(new URL(url, window.location.href).href);
         expect(JSON.stringify(stored)).toBe(before);
       } finally {
@@ -81,8 +85,12 @@ test("site visibility comes from storage and sibling cards follow confirmed writ
   const sibling = mountSites(site, "sibling");
   try {
     const popover = wrapper.getComponent({ name: "FullPopover" });
-    const toggle = wrapper.get<HTMLInputElement>('[role="switch"]');
     popover.vm.$emit("toggle", { newState: "open" });
+    await wrapper.vm.$nextTick();
+    const share = wrapper.getComponent({ name: "BasePopover" });
+    const toggle = wrapper.get<HTMLInputElement>('[role="switch"]');
+    expect(getSite).not.toHaveBeenCalled();
+    share.vm.$emit("toggle", { newState: "open" });
     await wrapper.vm.$nextTick();
     expect(toggle.element.disabled).toBe(true);
     expect(setSitePublic).not.toHaveBeenCalled();
@@ -112,10 +120,10 @@ test("site visibility comes from storage and sibling cards follow confirmed writ
     expect(toggle.element.checked).toBe(false);
     expect(sibling.text()).toContain("Private site");
 
-    popover.vm.$emit("toggle", { newState: "closed" });
+    share.vm.$emit("toggle", { newState: "closed" });
     await wrapper.vm.$nextTick();
     vi.mocked(getSite).mockRejectedValueOnce(new Error("Read failed"));
-    popover.vm.$emit("toggle", { newState: "open" });
+    share.vm.$emit("toggle", { newState: "open" });
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain("Read failed");
     expect(toggle.element.disabled).toBe(true);
@@ -137,6 +145,8 @@ test.each([true, false])(
     try {
       for (const wrapper of [chat, other]) {
         wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
+        await wrapper.vm.$nextTick();
+        wrapper.getComponent({ name: "BasePopover" }).vm.$emit("toggle", { newState: "open" });
         await wrapper.vm.$nextTick();
       }
       const older = () => first.resolve(site);

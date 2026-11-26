@@ -70,7 +70,6 @@ onBeforeUnmount(() => request?.abort());
     :site="activeSite"
     label="Sites"
     :preview-inert="choosing"
-    class="site-switcher-preview"
     @toggle="handleToggle"
     @opened="onSiteOpened"
   >
@@ -176,22 +175,6 @@ onBeforeUnmount(() => request?.abort());
 .site-chooser__item:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
-}
-
-@media (max-width: 360px) {
-  :global(.site-switcher-preview .full-popover__header) {
-    padding-inline: 0.55rem;
-    column-gap: 0.25rem;
-  }
-
-  :global(.site-switcher-preview .full-popover__header-actions) {
-    gap: 0;
-  }
-
-  :global(.site-switcher-preview .full-popover__header-actions .chrome-button--icon) {
-    width: 40px;
-    min-width: 40px;
-  }
 }
 
 .site-switcher__status {

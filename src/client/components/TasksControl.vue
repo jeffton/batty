@@ -96,6 +96,7 @@ function sessionToggle(taskId: string, event: Event): void {
     :count="tasks.length"
     noun="task"
     trigger-class="tasks-control"
+    align-narrow-viewport-left
     :show-trigger="Boolean(tasks.length || tasksOpen)"
     @toggle="tasksOpen = ($event as ToggleEvent).newState === 'open'"
   >

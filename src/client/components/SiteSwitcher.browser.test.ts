@@ -61,7 +61,6 @@ async function siteFixture(page: Page, initialSites: SiteDescriptor[], initialRe
       ...recent.map((id) => sites.find((site) => site.id === id)!),
       ...sites.filter((site) => !recent.includes(site.id)),
     ],
-    recentSiteIds: recent,
   });
   await fixtureOperation(server, page, "site.catalog", () => {
     catalogCalls++;
@@ -178,13 +177,23 @@ test.each([
       const choices = page.getByRole("list", { name: "Available sites" });
       const first = choices.getByRole("button", { name: names[0], exact: true });
       const selected = choices.getByRole("button", { name: neverOpened.name });
-      expect(await launcher.locator("svg").getAttribute("class")).toContain("lucide-app-window");
+      expect(await launcher.locator("svg").getAttribute("class")).toContain("lucide-newspaper");
       expect(
         await page
           .getByRole("button", { name: "Open browser" })
           .locator("svg")
           .getAttribute("class"),
       ).toContain("lucide-globe");
+      const headerButtons = page.locator("header.header .header__button");
+      expect(
+        await headerButtons.evaluateAll((buttons) =>
+          buttons.map((button) => button.getAttribute("aria-label")),
+        ),
+      ).toEqual(["Settings", "Sites", "Open browser", "Cron", "Workspaces and tools"]);
+      const settingsBounds = (await headerButtons.first().boundingBox())!;
+      const sitesBounds = (await launcher.boundingBox())!;
+      expect(sitesBounds.x).toBeGreaterThan(settingsBounds.x);
+      expect(sitesBounds.y).toBe(settingsBounds.y);
       if (mobile && process.env.BATTY_SITE_SWITCHER_SCREENSHOTS) {
         await page.screenshot({
           path: `${process.env.BATTY_SITE_SWITCHER_SCREENSHOTS}/toolbar.png`,
@@ -273,15 +282,60 @@ test.each([
       expect(await switcher.locator(".full-popover__title").textContent()).toBe(neverOpened.name);
       expect(await trigger.evaluate((element) => element === document.activeElement)).toBe(true);
 
-      const publicity = switcher.getByRole("switch", { name: "Public" });
-      await activate(publicity);
+      const share = switcher.getByRole("button", { name: "Share site", exact: true });
+      const shareMenu = page.getByRole("group", { name: "Share site" });
+      const copy = shareMenu.getByRole("button", { name: "Copy link" });
+      const publicity = shareMenu.getByRole("switch", { name: "Public" });
+      await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+      expect(await publicity.isVisible()).toBe(false);
+      if (mobile) await activate(share);
+      else await share.press("Enter");
+      await shareMenu.waitFor();
+      await expect.poll(() => switcher.locator("iframe").getAttribute("inert")).toBe("");
+      const menuBounds = (await shareMenu.boundingBox())!;
+      const previewBounds = (await switcher.boundingBox())!;
+      expect(menuBounds.width).toBeLessThan(previewBounds.width);
+      expect(menuBounds.height).toBeLessThan(previewBounds.height);
+      const copyLink = async (id: string) => {
+        if (mobile) await activate(copy);
+        else {
+          await expect
+            .poll(() => copy.evaluate((element) => element === document.activeElement))
+            .toBe(true);
+          await page.keyboard.press("Enter");
+        }
+        await shareMenu.getByRole("button", { name: "Copied" }).waitFor();
+        expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+          new URL(`${baseUrl}/sites/${id}/`, url).href,
+        );
+      };
+      await copyLink(neverOpened.id);
+      expect(state.saves).toEqual([]);
+      if (process.env.BATTY_SITE_SWITCHER_SCREENSHOTS)
+        await page.screenshot({
+          path: `${process.env.BATTY_SITE_SWITCHER_SCREENSHOTS}/share-${mobile ? "mobile" : "desktop"}.png`,
+        });
+      if (!mobile) {
+        await page.keyboard.press("Tab");
+        await expect
+          .poll(() => publicity.evaluate((element) => element === document.activeElement))
+          .toBe(true);
+        await page.keyboard.press("Space");
+      } else await activate(publicity);
       await expect.poll(() => publicity.isChecked()).toBe(true);
       expect(state.saves).toEqual([[neverOpened.id, true]]);
+      if (mobile) await activate(switcher.locator(".full-popover__title"));
+      else {
+        await page.keyboard.press("Escape");
+        expect(await share.evaluate((element) => element === document.activeElement)).toBe(true);
+      }
+      await shareMenu.waitFor({ state: "hidden" });
       await activate(close);
       await switcher.waitFor({ state: "hidden" });
       await page.reload();
       await activate(launcher);
       await frame.getByRole("heading", { name: neverOpened.name }).waitFor();
+      await activate(share);
       await expect.poll(() => publicity.isChecked()).toBe(true);
       await activate(publicity);
       await expect.poll(() => publicity.isChecked()).toBe(false);
@@ -289,10 +343,17 @@ test.each([
         [neverOpened.id, true],
         [neverOpened.id, false],
       ]);
-      expect(state.catalogCalls()).toBe(2);
-      expect(state.opened).toEqual([recent[0]!.id, neverOpened.id, neverOpened.id]);
       await activate(trigger);
-      expect(await selected.getAttribute("aria-current")).toBe("page");
+      await shareMenu.waitFor({ state: "hidden" });
+      await activate(first);
+      await frame.getByRole("heading", { name: names[0] }).waitFor();
+      await activate(share);
+      await copyLink(recent[0]!.id);
+      expect(await publicity.isChecked()).toBe(false);
+      expect(state.catalogCalls()).toBe(2);
+      expect(state.opened).toEqual([recent[0]!.id, neverOpened.id, neverOpened.id, recent[0]!.id]);
+      await activate(trigger);
+      expect(await first.getAttribute("aria-current")).toBe("page");
       await activate(close);
       await switcher.waitFor({ state: "hidden" });
       await choices.waitFor({ state: "hidden" });
@@ -334,7 +395,8 @@ test("a delayed open response cannot replace the current site", async () => {
     await expect.poll(() => state.opened).toEqual([first.id, second.id]);
     release.resolve();
     await completed.promise;
-    const publicity = switcher.getByRole("switch", { name: "Public" });
+    await switcher.getByRole("button", { name: "Share site" }).click();
+    const publicity = page.getByRole("switch", { name: "Public" });
     await publicity.click();
     await expect.poll(() => publicity.isChecked()).toBe(true);
     expect(state.saves).toEqual([[second.id, true]]);
@@ -360,7 +422,8 @@ test("Public remains usable when saving a recent visit fails", async () => {
     const switcher = page.getByRole("dialog", { name: "Sites" });
     await switcher.getByRole("alert").filter({ hasText: "History write failed" }).waitFor();
     await switcher.frameLocator("iframe").getByRole("heading", { name: site.name }).waitFor();
-    const publicity = switcher.getByRole("switch", { name: "Public" });
+    await switcher.getByRole("button", { name: "Share site" }).click();
+    const publicity = page.getByRole("switch", { name: "Public" });
     await publicity.click();
     await expect.poll(() => publicity.isChecked()).toBe(true);
     await publicity.click();

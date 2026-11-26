@@ -11,6 +11,7 @@ const props = withDefaults(
     anchorDown?: boolean;
     floating?: boolean;
     alignViewportRight?: boolean;
+    alignNarrowViewportLeft?: boolean;
     alignAnchorLeft?: boolean;
     boundaryId?: string;
     dimBackdrop?: boolean;
@@ -57,6 +58,12 @@ function positionAtAnchor(): void {
   const margin = 8;
   const width = Math.min(popover.offsetWidth, right - left - margin * 2);
   const anchorLeft = props.alignAnchorLeft ? rect.left : rect.right - width;
+  const alignViewportLeft = props.alignNarrowViewportLeft && viewportWidth <= 600;
+  const popoverLeft = alignViewportLeft
+    ? left + margin
+    : props.alignViewportRight
+      ? right - width - margin
+      : Math.max(left + margin, Math.min(anchorLeft, right - width - margin));
   anchorStyle.value = {
     position: "fixed",
     positionArea: "none",
@@ -64,7 +71,7 @@ function positionAtAnchor(): void {
     top: props.anchorDown ? `${rect.bottom + margin}px` : "auto",
     right: "auto",
     bottom: props.anchorDown ? "auto" : `${window.innerHeight - rect.top + margin}px`,
-    left: `${props.alignViewportRight ? right - width - margin : Math.max(left + margin, Math.min(anchorLeft, right - width - margin))}px`,
+    left: `${popoverLeft}px`,
     maxWidth: `${right - left - margin * 2}px`,
     maxHeight: `min(var(--anchored-popover-max-height, 32rem), ${Math.max(0, props.anchorDown ? bottom - rect.bottom - margin * 2 : rect.top - top - margin * 2)}px)`,
     margin: "0",

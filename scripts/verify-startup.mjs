@@ -293,7 +293,7 @@ for (const baseUrl of ["/", "/batty"]) {
     const firstSite = "10000000-0000-0000-0000-000000000002";
     const secondSite = "10000000-0000-0000-0000-000000000003";
     const incompleteSite = "10000000-0000-0000-0000-000000000004";
-    const makeSite = async (id, ready) => {
+    const makeSite = async (id, ready, createdAt) => {
       const dir = path.join(root, ".batty/sites", id);
       await fs.mkdir(path.join(dir, "content"), { recursive: true });
       await fs.writeFile(
@@ -303,27 +303,35 @@ for (const baseUrl of ["/", "/batty"]) {
           name: "Example",
           public: false,
           accessToken: "private-preview-token",
-          createdAt: Date.now(),
+          createdAt,
         }),
       );
       if (ready) await fs.writeFile(path.join(dir, "content/index.html"), "<h1>Example</h1>");
     };
     await Promise.all([
-      makeSite(firstSite, true),
-      makeSite(secondSite, true),
-      makeSite(incompleteSite, false),
+      makeSite(firstSite, true, 1),
+      makeSite(secondSite, true, 2),
+      makeSite(incompleteSite, false, 3),
     ]);
     const sites = await call("site.catalog");
-    assert.deepEqual(sites.recentSiteIds, []);
-    assert.deepEqual(sites.sites.map(({ id }) => id).sort(), [firstSite, secondSite]);
+    assert.deepEqual(
+      sites.sites.map(({ id }) => id),
+      [secondSite, firstSite],
+    );
     assert(!JSON.stringify(sites).includes("private-preview-token"));
     await call("site.open", { siteId: firstSite });
     await call("site.open", { siteId: incompleteSite });
+    assert.deepEqual(
+      (await call("site.catalog")).sites.map(({ id }) => id),
+      [firstSite, secondSite],
+    );
     const resumedSite = await call("site.open", { siteId: secondSite });
     assert.equal(resumedSite.site.id, secondSite);
     assert.equal(resumedSite.site.public, false);
-    assert.deepEqual(resumedSite.recentSiteIds, [secondSite, firstSite]);
-    assert.deepEqual((await call("site.catalog")).recentSiteIds, [secondSite, firstSite]);
+    assert.deepEqual(
+      resumedSite.sites.map(({ id }) => id),
+      [secondSite, firstSite],
+    );
     await assert.rejects(call("browser.state", { browserId: id }));
     assert.deepEqual(await call("cron.running"), []);
     assert.deepEqual(await call("push.ack", { clientId: id, challengeId: id }), { ok: false });

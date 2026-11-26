@@ -14,7 +14,7 @@ import {
   setFixtureRpcHandler,
   waitForFixtureOperation,
 } from "../test/socket-fixture";
-import { createSite, getSite } from "@/server/sites";
+import { createSite, getSite, setSitePublic } from "@/server/sites";
 import { registerSiteRoutes } from "@/server/routes/sites";
 import { registerSiteFunction } from "@/server/site-functions";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
@@ -103,7 +103,6 @@ test("sandboxed nested site previews call functions and reject stale-document re
     expect((await siteRead).value).toEqual({
       site: site.descriptor,
       sites: [site.descriptor],
-      recentSiteIds: [site.descriptor.id],
     });
     const frame = page.frameLocator("iframe");
     await frame.getByAltText("Fixture image").waitFor({ state: "visible" });
@@ -122,6 +121,8 @@ test("sandboxed nested site previews call functions and reject stale-document re
     const imageUrl = await frame.getByAltText("Fixture image").getAttribute("src");
     expect(new URL(imageUrl!, frameUrl).pathname).toBe(`${site.browserUrl}photo.svg`);
 
+    const share = page.getByRole("button", { name: "Share site" });
+    await share.click();
     const visibility = page.getByRole("switch", { name: "Public" });
     await visibility.click();
     await expect.poll(() => visibility.isChecked()).toBe(true);
@@ -130,6 +131,15 @@ test("sandboxed nested site previews call functions and reject stale-document re
     await expect.poll(() => visibility.isChecked()).toBe(false);
     expect((await getSite(sitesDir, baseUrl, site.descriptor.id)).descriptor.public).toBe(false);
 
+    await page.keyboard.press("Escape");
+    await visibility.waitFor({ state: "hidden" });
+    await setSitePublic(sitesDir, baseUrl, site.descriptor.id, true);
+    await share.click();
+    await expect.poll(() => visibility.isChecked()).toBe(true);
+    await visibility.click();
+    await expect.poll(() => visibility.isChecked()).toBe(false);
+    await page.keyboard.press("Escape");
+    await visibility.waitFor({ state: "hidden" });
     await frame.getByRole("button", { name: "Generate" }).click();
     await expect
       .poll(() => frame.locator("output").textContent(), { timeout: 10000 })

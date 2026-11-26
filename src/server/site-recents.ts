@@ -66,6 +66,6 @@ export class SiteRecents {
       remaining.delete(id);
       return [site];
     });
-    return { sites: [...opened, ...remaining.values()], recentSiteIds: opened.map(({ id }) => id) };
+    return { sites: [...opened, ...remaining.values()] };
   }
 }

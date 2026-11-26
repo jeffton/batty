@@ -265,10 +265,10 @@ test("keeps stream controls centered independently of the left and right compose
       const contextUsage = header.locator(".session-header-status__context");
       const connection = header.locator(".session-header-status__connection");
       for (const [first, next] of [
-        [settings, browserButton],
+        [settings, sites],
+        [sites, browserButton],
         [browserButton, cron],
         [cron, tools],
-        [tools, sites],
         [usage, contextUsage],
         [contextUsage, connection],
       ] as const) {
@@ -278,11 +278,11 @@ test("keeps stream controls centered independently of the left and right compose
       const connectionBox = (await connection.boundingBox())!;
       expect(settingsX).toBeGreaterThanOrEqual(sideInset + 4);
       expect(connectionBox.x + connectionBox.width).toBeLessThanOrEqual(width - sideInset - 4);
-      const sitesBox = (await sites.boundingBox())!;
+      const toolsBox = (await tools.boundingBox())!;
       const usageBox = (await usage.boundingBox())!;
-      expect(sitesBox.x + sitesBox.width).toBeLessThanOrEqual(width - sideInset - 4);
-      if (usageBox.y === sitesBox.y) expect(await spacing(sites, usage)).toBeGreaterThanOrEqual(0);
-      else expect(usageBox.y).toBeGreaterThanOrEqual(sitesBox.y + sitesBox.height);
+      expect(toolsBox.x + toolsBox.width).toBeLessThanOrEqual(width - sideInset - 4);
+      if (usageBox.y === toolsBox.y) expect(await spacing(tools, usage)).toBeGreaterThanOrEqual(0);
+      else expect(usageBox.y).toBeGreaterThanOrEqual(toolsBox.y + toolsBox.height);
       expect(active.g!.x).toBeGreaterThanOrEqual(active.t!.x + active.t!.width - 1);
       expect(active.g!.x + active.g!.width).toBeLessThanOrEqual(active.d.x + 1);
       expect(active.g!.x + active.g!.width / 2).toBeCloseTo(width / 2, 0);
@@ -353,8 +353,15 @@ test("keeps stream controls centered independently of the left and right compose
               panel.boundingBox(),
             ]);
             if (!button || !bounds) return null;
-            const expected = Math.max(8, Math.min(button.x, width - 8 - bounds.width));
-            return Math.abs(expected - bounds.x) < 1 && bounds.y + bounds.height < button.y;
+            const expected =
+              hasTouch && label === "Running tasks"
+                ? 8
+                : Math.max(8, Math.min(button.x, width - 8 - bounds.width));
+            return (
+              Math.abs(expected - bounds.x) < 1 &&
+              bounds.x + bounds.width <= width - 7 &&
+              Math.abs(button.y - (bounds.y + bounds.height) - 8) < 1
+            );
           })
           .toBe(true);
         await capture(label === "Drafts" ? "drafts" : "tasks");

@@ -5,6 +5,7 @@ import path from "node:path";
 import { expect, test } from "vite-plus/test";
 import { SiteRecents } from "./site-recents";
 import { createSite, setSitePublic } from "./sites";
+import { stateDirPath } from "./options";
 
 test("only ready local sites can become recent, and visits remain ordered across overlapping opens and restart", async () => {
   const battyDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-site-recents-"));
@@ -28,11 +29,13 @@ test("only ready local sites can become recent, and visits remain ordered across
       path.join(unsafe.directory, "index.html"),
     );
     const initial = await recent.catalog();
-    expect(initial.recentSiteIds).toEqual([]);
     expect(initial.sites).toHaveLength(2);
     expect(initial.sites).toEqual(expect.arrayContaining([a.descriptor, b.descriptor]));
     const openedEmpty = await recent.open(empty.descriptor.id);
     expect(openedEmpty).toEqual({ ...initial, site: empty.descriptor });
+    await expect(
+      fs.access(path.join(stateDirPath(battyDir), "site-recents.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
     await setSitePublic(sitesDir, baseUrl, b.descriptor.id, true);
     const outcomes = await Promise.allSettled([
       recent.open(a.descriptor.id),
@@ -43,13 +46,13 @@ test("only ready local sites can become recent, and visits remain ordered across
     expect(outcomes[1]).toMatchObject({ status: "rejected", reason: { statusCode: 404 } });
     expect(outcomes[2]).toMatchObject({ status: "fulfilled", value: { site: { public: true } } });
     const order = [b.descriptor.id, a.descriptor.id];
-    expect(outcomes[3]).toMatchObject({ status: "fulfilled", value: { recentSiteIds: order } });
-    expect((await new SiteRecents(config).catalog()).recentSiteIds).toEqual(order);
-    await fs.unlink(path.join(b.directory, "index.html"));
-    expect(await recent.catalog()).toEqual({
-      sites: [a.descriptor],
-      recentSiteIds: [a.descriptor.id],
+    expect(outcomes[3]).toMatchObject({
+      status: "fulfilled",
+      value: { sites: order.map((id) => ({ id })) },
     });
+    expect((await new SiteRecents(config).catalog()).sites.map(({ id }) => id)).toEqual(order);
+    await fs.unlink(path.join(b.directory, "index.html"));
+    expect(await recent.catalog()).toEqual({ sites: [a.descriptor] });
   } finally {
     await fs.rm(battyDir, { recursive: true, force: true });
   }

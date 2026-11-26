@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vite-plus/test";
+import type { SessionState } from "../shared/types";
 import { createNodeRpcHandler } from "./node-rpc";
 import type { RemoteWorkers } from "./remote-workers";
 import type { RemoteConnectionCredentials } from "./remote-access";
@@ -117,7 +118,7 @@ test.each([false, true])(
   "session watch handles grant removal during projection (transport aborted: %s)",
   async (abortTransport) => {
     let live = true;
-    const projection = Promise.withResolvers<unknown>();
+    const projection = Promise.withResolvers<SessionState>();
     const entered = Promise.withResolvers<void>();
     const detached = vi.fn();
     const connection = {
@@ -161,7 +162,26 @@ test.each([false, true])(
     await entered.promise;
     live = false;
     if (abortTransport) signal.abort();
-    projection.resolve({ messages: [], historyCursor: "0", revision: 1 });
+    projection.resolve({
+      id: "2",
+      sessionId: "2",
+      workspaceId: "work",
+      cwd: "/work",
+      revision: 1,
+      thinkingLevel: "off",
+      availableThinkingLevels: ["off"],
+      isStreaming: false,
+      pendingMessageCount: 0,
+      updatedAt: 0,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 0,
+      hasMoreMessages: false,
+      messages: [],
+      activeTools: [],
+      historyCursor: "0",
+    });
     if (abortTransport) expect(await read).toEqual({ done: true, value: undefined });
     else expect(await read).toMatchObject({ code: "UNAUTHORIZED" });
     // A second authorization failure from the error-event write used to escape

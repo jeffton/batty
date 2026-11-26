@@ -276,7 +276,7 @@ export class BrowserService {
     if (input.action === "attach") {
       const site = await this.viewer.cloudAttachment(session);
       return {
-        text: "Live cloud browser attached. The user and agent share this browser session.",
+        text: "Live cloud browser ready.",
         details: { action: "attach", sites: [site] },
       };
     }

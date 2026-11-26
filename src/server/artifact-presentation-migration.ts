@@ -33,6 +33,9 @@ interface MigrationCounts {
   diffs: number;
   unrecoveredNotices: number;
   terminalNativeGroups: number;
+  uploadedInputs: number;
+  remoteFiles: number;
+  remoteNotices: number;
 }
 
 function counts(): MigrationCounts {
@@ -46,6 +49,9 @@ function counts(): MigrationCounts {
     diffs: 0,
     unrecoveredNotices: 0,
     terminalNativeGroups: 0,
+    uploadedInputs: 0,
+    remoteFiles: 0,
+    remoteNotices: 0,
   };
 }
 
@@ -87,6 +93,9 @@ function presentation(fields: ArtifactFields, totals: MigrationCounts) {
   if (!sentFiles && !sites && !fileChanges) return undefined;
   const normalizedSites = sites?.map(decodeSiteAttachmentDescriptor);
   totals.files += sentFiles?.length ?? 0;
+  totals.remoteFiles +=
+    sentFiles?.filter(({ downloadUrl }) => downloadUrl?.includes("/api/sent-files/remote-"))
+      .length ?? 0;
   totals.sites += normalizedSites?.filter(({ kind }) => kind === "site").length ?? 0;
   totals.browsers += normalizedSites?.filter(({ kind }) => kind === "browser").length ?? 0;
   totals.diffs += fileChanges?.length ?? 0;
@@ -269,8 +278,12 @@ async function convertNotices(tx: SqliteExecutor, entry: EntryRecord, totals: Mi
     for (const [index, message] of messages.entries()) {
       if ((message as { display?: unknown }).display === false) continue;
       if (message.role === "user") {
+        const uploads = (message as { battyAttachments?: unknown[] }).battyAttachments;
+        if (Array.isArray(uploads)) totals.uploadedInputs += uploads.length;
         const notice = decodeRuntimeNotice(message.content);
         if (!notice) continue;
+        const source = notice.data?.subagent as { sessionId?: string } | undefined;
+        if (source?.sessionId?.startsWith("remote:")) ++totals.remoteNotices;
         if (
           await convertNoticeData(
             tx,
@@ -350,7 +363,7 @@ function legacyResponseCandidate(message: Message): boolean {
 const eventRows = `SELECT record FROM entries WHERE id>? AND (
   instr(record,'"assistant"') OR instr(record,'"attach_files"') OR instr(record,'"sites"')
     OR instr(record,'"forwardedArtifacts"') OR instr(record,'"browser"')
-    OR instr(record,'batty-runtime-notice')) ORDER BY id LIMIT ?`;
+    OR instr(record,'batty-runtime-notice') OR instr(record,'"battyAttachments"')) ORDER BY id LIMIT ?`;
 
 export async function migrateArtifactPresentation(database: SqliteDatabase, inspect = false) {
   return database.transaction(async (tx) => {

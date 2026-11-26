@@ -31,7 +31,7 @@ import { getSupportedThinkingLevels, type ModelThinkingLevel } from "@earendil-w
 import type { AppConfig } from "./config";
 import { stateDirPath } from "./options";
 import { enableCodemodeAdapters } from "./codemode-native";
-import { listWorkspaces } from "./workspaces";
+import { listWorkspaces, workspaceForCwd } from "./workspaces";
 import { normalizeMessage, normalizeBlocks } from "./pi-state";
 import { ArtifactLibrary } from "./artifact-library";
 import { resolvePresentation } from "./message-presentation";
@@ -152,11 +152,10 @@ export class Runtime {
     const orchestration = createOrchestration(config, networkAvailable, {
       resolvePresentation: (conversationId, selection) =>
         resolvePresentation(artifactLibrary, selection, async (id) => {
-          const workspaceId =
-            (await orchestration.metadata(conversationId))?.workspaceId ??
-            (await listWorkspaces(config)).find((workspace) => workspace.isAssistant)?.id;
-          if (!workspaceId) throw new Error("No browser workspace");
-          return tools.browserService.messageBrowser(workspaceId, id);
+          const conversation = (await harness.conversation(conversationId, context))!;
+          const cwd = (await conversation.agent(context)).cwd!;
+          const workspace = await workspaceForCwd(config, cwd);
+          return tools.browserService.messageBrowser(workspace.id, id);
         }),
       resolveFileSource: (ref) => artifactLibrary.resolveFileSource(ref),
     });

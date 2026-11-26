@@ -22,7 +22,7 @@ node --import tsx scripts/migrate-artifact-presentation.ts migrate "$REHEARSAL"
 node --import tsx scripts/migrate-artifact-presentation.ts validate "$REHEARSAL"
 ```
 
-`inspect` reports aggregate counts without writing entries. `migrate` puts converted metadata and its marker in one transaction, verifies each updated entry via the normal SQLite decoder, and is idempotent. Counts are attachment occurrences, not unique artifacts; `unrecoveredNotices` counts older notices with no exact recoverable delivery and no stored descriptors. `terminalNativeGroups` counts conversations with such trailing native outputs. Neither case assigns attachments to a different reply.
+`inspect` reports aggregate counts without writing entries. `migrate` puts converted metadata and its marker in one transaction, verifies each updated entry via the normal SQLite decoder, and is idempotent. Counts are attachment occurrences, not unique artifacts. `uploadedInputs` counts durable user upload descriptors (only inventoried, not migrated); `remoteFiles` counts migrated file occurrences previously imported into a `remote-*` workspace, and `remoteNotices` counts encoded notices with a remote session ID. `unrecoveredNotices` counts older notices with no exact recoverable delivery and no stored descriptors. `terminalNativeGroups` counts conversations with such trailing native outputs. Neither case assigns attachments to a different reply.
 
 ## Release and rollback
 

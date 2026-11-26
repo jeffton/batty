@@ -264,6 +264,9 @@ test("preserves explicit and recovered notices, direct cron attachments, and pac
       diffs: 3,
       unrecoveredNotices: 0,
       terminalNativeGroups: 0,
+      uploadedInputs: 0,
+      remoteFiles: 0,
+      remoteNotices: 0,
     });
     const row = async (id: number) =>
       JSON.parse(

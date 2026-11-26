@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import "./chooser-popover.css";
 import { Check, SquareStack } from "@lucide/vue";
 import { nextTick, onBeforeUnmount, ref, shallowRef } from "vue";
 import { getLatestSite, getSiteCatalog } from "@/client/lib/api";
 import type { SiteDescriptor } from "@/shared/types";
+import { setPopoverInitialFocus } from "@/client/lib/popover-focus";
 import BasePopover from "./BasePopover.vue";
 import LoadingIndicator from "./LoadingIndicator.vue";
 import SitePopover from "./SitePopover.vue";
@@ -19,6 +21,12 @@ const catalogLoading = ref(false);
 const catalogError = ref("");
 let request: AbortController | undefined;
 let catalogRequest: AbortController | undefined;
+let focusChoiceOnLoad = false;
+
+function handleChooserClick(event: MouseEvent): void {
+  focusChoiceOnLoad = event.detail === 0;
+  setPopoverInitialFocus(event);
+}
 
 async function loadLatest(): Promise<void> {
   request = new AbortController();
@@ -63,7 +71,7 @@ async function handleChooserToggle(event: Event): Promise<void> {
     if (signal.aborted) return;
     const firstLoad = sites.value.length === 0;
     sites.value = result.sites;
-    if (firstLoad) await focusLoadedChoice(signal);
+    if (firstLoad && focusChoiceOnLoad) await focusLoadedChoice(signal);
   } catch (cause) {
     if (!signal.aborted)
       catalogError.value = cause instanceof Error ? cause.message : String(cause);
@@ -78,7 +86,9 @@ async function focusLoadedChoice(signal: AbortSignal): Promise<void> {
   const menu = chooser.value?.element;
   const focused = document.activeElement;
   if (focused === document.body || focused === trigger.value || focused === menu)
-    menu?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus({ preventScroll: true });
+    menu
+      ?.querySelector<HTMLButtonElement>("[data-popover-initial-focus]")
+      ?.focus({ preventScroll: true });
 }
 
 function closeChooser(): void {
@@ -113,6 +123,7 @@ onBeforeUnmount(() => {
         :popovertarget="`${props.popoverId}-chooser`"
         aria-label="Choose site"
         title="Choose site"
+        @click="handleChooserClick"
       >
         <SquareStack :size="18" />
       </button>
@@ -120,8 +131,9 @@ onBeforeUnmount(() => {
         :id="`${props.popoverId}-chooser`"
         ref="chooser"
         anchor-down
+        align-viewport-right
         :boundary-id="props.popoverId"
-        class="site-chooser"
+        class="chooser-popover"
         @toggle="handleChooserToggle"
         @keydown.esc.stop.prevent="closeChooser"
       >
@@ -134,18 +146,18 @@ onBeforeUnmount(() => {
           {{ catalogError }}
         </p>
         <ul v-if="sites.length" class="site-chooser__list" role="list" aria-label="Available sites">
-          <li v-for="site in sites" :key="site.id">
+          <li v-for="site in sites" :key="site.id" class="chooser-popover__row">
             <button
               type="button"
-              class="site-chooser__item"
+              class="chooser-popover__select"
               :aria-current="site.id === activeSite.id ? 'page' : undefined"
-              :autofocus="site.id === activeSite.id"
+              :data-popover-initial-focus="site.id === activeSite.id ? '' : undefined"
               @click="selectSite(site)"
             >
-              <span class="site-chooser__check" aria-hidden="true">
+              <span class="chooser-popover__current" aria-hidden="true">
                 <Check v-if="site.id === activeSite.id" :size="16" />
               </span>
-              {{ site.name }}
+              <span class="chooser-popover__label"><strong>{{ site.name }}</strong></span>
             </button>
           </li>
         </ul>
@@ -160,61 +172,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-:global(.site-chooser) {
-  width: 20rem;
-  padding: 0.3rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.6rem;
-  background: var(--color-bg-overlay);
-  color: var(--color-text);
-  box-shadow: var(--color-shadow-popover);
-  overflow: auto;
-}
-
 .site-chooser__list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.site-chooser__item {
-  display: grid;
-  grid-template-columns: 1rem minmax(0, 1fr);
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  height: auto;
-  min-height: 2.75rem;
-  padding: 0.6rem;
-  border: 0;
-  border-radius: 0.4rem;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
+.site-chooser__list .chooser-popover__label strong {
+  white-space: normal;
   overflow-wrap: anywhere;
-  cursor: pointer;
-}
-
-.site-chooser__check {
-  display: flex;
-}
-
-.site-chooser__item[aria-current] {
-  background: var(--color-chrome-hover);
-  color: var(--color-link);
-}
-
-@media (hover: hover) {
-  .site-chooser__item:hover {
-    background: var(--color-chrome-hover);
-    color: var(--color-link);
-  }
-}
-
-.site-chooser__item:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
 }
 
 .site-switcher__status {

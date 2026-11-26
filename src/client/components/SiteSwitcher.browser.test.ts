@@ -217,27 +217,23 @@ test.each([
       );
 
       if (mobile) await activate(trigger);
-      else {
-        await trigger.focus();
-        await page.keyboard.press("Enter");
-        await expect
-          .poll(() => first.evaluate((element) => element === document.activeElement))
-          .toBe(true);
-      }
+      else await trigger.press("Enter");
       await choices.waitFor();
+      expect(await first.evaluate((element) => element.matches(":focus"))).toBe(!mobile);
+      expect(await first.evaluate((element) => element.matches(":focus-visible"))).toBe(!mobile);
       expect(await first.getAttribute("aria-current")).toBe("page");
       expect(
         (await choices.getByRole("button").allTextContents()).map((name) => name.trim()),
       ).toEqual(allSites.map((site) => site.name));
       await expect
         .poll(async () => {
-          const menu = await choices.boundingBox();
+          const menu = await choices.locator("..").boundingBox();
           const preview = await switcher.boundingBox();
           return (
             !!menu &&
             !!preview &&
             menu.x > preview.x &&
-            menu.x + menu.width < preview.x + preview.width &&
+            Math.abs(preview.x + preview.width - (menu.x + menu.width) - 8) < 1 &&
             menu.height < preview.height
           );
         })
@@ -258,6 +254,7 @@ test.each([
         expect(await trigger.evaluate((element) => element === document.activeElement)).toBe(true);
         await activate(trigger);
         await choices.waitFor();
+        expect(await first.evaluate((element) => element.matches(":focus-visible"))).toBe(false);
       }
       const siteAction = frame.getByRole("button", { name: "Page action" });
       const bounds = (await siteAction.boundingBox())!;
@@ -300,6 +297,14 @@ test.each([
       if (mobile) await activate(share);
       else await share.press("Enter");
       await shareMenu.waitFor();
+      expect(await copy.evaluate((element) => element.matches(":focus"))).toBe(!mobile);
+      expect(await copy.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe(
+        mobile ? "none" : "solid",
+      );
+      if (mobile) {
+        await page.keyboard.press("Tab");
+        expect(await copy.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+      }
       await expect.poll(() => switcher.locator("iframe").getAttribute("inert")).toBe("");
       const menuBounds = (await shareMenu.boundingBox())!;
       const previewBounds = (await switcher.boundingBox())!;
@@ -329,6 +334,7 @@ test.each([
         await expect
           .poll(() => publicity.evaluate((element) => element === document.activeElement))
           .toBe(true);
+        expect(await publicity.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
         await page.keyboard.press("Space");
       } else await activate(publicity);
       await expect.poll(() => publicity.isChecked()).toBe(true);
@@ -361,7 +367,16 @@ test.each([
       await shareMenu.waitFor({ state: "hidden" });
       await activate(first);
       await frame.getByRole("heading", { name: names[0] }).waitFor();
+      if (!mobile) {
+        await share.evaluate((element) => {
+          element.addEventListener("mousedown", (event) => event.preventDefault(), { once: true });
+        });
+      }
       await activate(share);
+      await copy.waitFor();
+      expect(await copy.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none");
+      expect(await share.evaluate((element) => element.matches(":focus"))).toBe(true);
+      if (!mobile) await page.keyboard.press("Tab");
       await copyLink(recent[0]!.id);
       expect(await publicity.isChecked()).toBe(false);
       expect(state.latestCalls()).toBe(2);

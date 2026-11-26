@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, Copy, Share } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { setPopoverInitialFocus } from "@/client/lib/popover-focus";
 import BasePopover from "./BasePopover.vue";
 import {
   confirmedSitePublic,
@@ -96,6 +97,7 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
     :popovertarget="`${props.popoverId}-share`"
     aria-label="Share site"
     title="Share site"
+    @click="setPopoverInitialFocus"
   >
     <Share :size="18" />
   </button>
@@ -110,7 +112,7 @@ onBeforeUnmount(() => window.clearTimeout(copiedTimeout));
     @toggle="handleToggle"
     @keydown.esc.stop.prevent="close"
   >
-    <button type="button" class="site-share__copy" autofocus @click="copyLink">
+    <button type="button" class="site-share__copy" data-popover-initial-focus @click="copyLink">
       <Check v-if="copied" :size="16" aria-hidden="true" />
       <Copy v-else :size="16" aria-hidden="true" />
       <span aria-live="polite">{{ copied ? "Copied" : "Copy link" }}</span>

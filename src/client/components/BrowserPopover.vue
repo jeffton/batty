@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import "./chooser-popover.css";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BasePopover from "@/client/components/BasePopover.vue";
@@ -248,23 +249,27 @@ onBeforeUnmount(() => {
           ref="tabs"
           anchor-down
           :boundary-id="popoverId"
-          class="cloud-browser-tabs"
+          class="chooser-popover"
         >
           <button type="button" class="cloud-browser-tabs__new" @click="newTab">
             <Plus :size="18" aria-hidden="true" />
             New tab
           </button>
-          <div v-for="page in availablePages" :key="page.id" class="cloud-browser-tabs__row">
+          <div
+            v-for="page in availablePages"
+            :key="page.id"
+            class="chooser-popover__row cloud-browser-tabs__row"
+          >
             <button
               type="button"
-              class="cloud-browser-tabs__select"
+              class="chooser-popover__select cloud-browser-tabs__select"
               :aria-current="page.active ? 'page' : undefined"
               @click="selectTab(page.id)"
             >
-              <span class="cloud-browser-tabs__current" aria-hidden="true">
+              <span class="chooser-popover__current" aria-hidden="true">
                 <Check v-if="page.active" :size="16" />
               </span>
-              <span class="cloud-browser-tabs__label">
+              <span class="chooser-popover__label">
                 <strong>{{ page.title || page.url || "New tab" }}</strong>
                 <small v-if="page.title">{{ page.url }}</small>
               </span>
@@ -384,81 +389,22 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-:global(.cloud-browser-tabs) {
-  width: 20rem;
-  padding: 0.3rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.6rem;
-  background: var(--color-bg-overlay);
-  color: var(--color-text);
-  box-shadow: var(--color-shadow-popover);
-  overflow: auto;
-}
-.cloud-browser-tabs button {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: 2.75rem;
-  padding: 0.6rem;
-  text-align: left;
-  border: 0;
-  border-radius: 0.4rem;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.cloud-browser-tabs__new:hover,
-.cloud-browser-tabs__row:hover,
-.cloud-browser-tabs__row:has([aria-current]) {
-  background: var(--color-chrome-hover);
-}
-.cloud-browser-tabs button:hover,
-.cloud-browser-tabs button[aria-current] {
-  color: var(--color-link);
-}
-.cloud-browser-tabs button:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
-}
 .cloud-browser-tabs__new {
   width: 100%;
 }
-.cloud-browser-tabs__row {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  border-radius: 0.4rem;
+@media (hover: hover) {
+  .cloud-browser-tabs__new:hover {
+    background: var(--color-chrome-hover);
+  }
 }
 .cloud-browser-tabs__row:first-of-type {
   margin-top: 0.3rem;
   padding-top: 0.3rem;
   border-top: 1px solid var(--color-border-soft);
 }
-.cloud-browser-tabs__select {
-  flex: 1;
-  min-width: 0;
-}
 .cloud-browser-tabs__close {
   justify-content: center;
   flex: 0 0 2.75rem;
-}
-.cloud-browser-tabs__current {
-  display: flex;
-  flex: 0 0 1rem;
-}
-.cloud-browser-tabs__label {
-  display: grid;
-  min-width: 0;
-}
-.cloud-browser-tabs__label strong,
-.cloud-browser-tabs__label small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cloud-browser-tabs__label small {
-  color: var(--color-text-muted);
 }
 .browser-popover :deep(.full-popover__header) {
   padding: 0.4rem;

@@ -309,13 +309,13 @@ test("a caller can send a received file ref, but cannot invent refs or use files
     undefined,
     undefined,
     (directory) => {
-      const library = new ArtifactResolver({
+      const resolver = new ArtifactResolver({
         sentFilesDir: join(directory, "sent-files"),
         sitesDir: join(directory, "sites"),
         uploadsDir: join(directory, "uploads"),
         baseUrl: "/",
       });
-      return (ref) => library.resolveFileSource(ref);
+      return (ref) => resolver.resolveFileSource(ref);
     },
   );
   const original = join(directory, "report.txt");

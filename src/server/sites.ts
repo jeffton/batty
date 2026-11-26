@@ -115,13 +115,11 @@ export async function getSite(
   descriptor: SiteDescriptor;
   directory: string;
   browserUrl: string;
-  createdAt: number;
 }> {
   const manifest = await readManifest(rootDir, siteId);
   const site = descriptor(manifest, baseUrl);
   return {
     descriptor: site,
-    createdAt: manifest.createdAt,
     directory: path.join(siteDirectory(rootDir, siteId), CONTENT_DIR),
     browserUrl: browserSiteUrl(baseUrl, manifest.id, manifest.accessToken),
   };

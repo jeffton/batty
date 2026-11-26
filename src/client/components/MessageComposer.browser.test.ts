@@ -386,13 +386,14 @@ test("keeps stream controls centered independently of the left and right compose
       await page.evaluate(() => window.dispatchEvent(new Event("fixture:hide-header-controls")));
       await browserButton.waitFor({ state: "hidden" });
       await usage.waitFor({ state: "hidden" });
-      expect(await spacing(settings, cron)).toBeCloseTo(gap, 0);
+      expect(await spacing(settings, sites)).toBeCloseTo(gap, 0);
+      expect(await spacing(sites, cron)).toBeCloseTo(gap, 0);
       expect(await spacing(contextUsage, connection)).toBeCloseTo(gap, 0);
       expect((await settings.boundingBox())!.x).toBe(settingsX);
       const compactConnectionBox = (await connection.boundingBox())!;
       expect(compactConnectionBox).toEqual({
         ...connectionBox,
-        y: connectionBox.y + Math.min(0, sitesBox.y - usageBox.y),
+        y: connectionBox.y + Math.min(0, toolsBox.y - usageBox.y),
       });
     } finally {
       await context.close();

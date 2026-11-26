@@ -342,6 +342,7 @@ export function createOwnerRpcHandler(runtime: Runtime, services: OwnerRpcServic
     ok: webPush.foreground.acknowledge(clientId, challengeId),
   }));
   add("site.catalog", () => siteRecents.catalog());
+  add("site.latest", () => siteRecents.latest());
   add("site.open", ({ siteId }) => {
     if (typeof siteId !== "string") badInput("siteId must be a string");
     return siteRecents.open(siteId);

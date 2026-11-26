@@ -326,12 +326,9 @@ for (const baseUrl of ["/", "/batty"]) {
       [firstSite, secondSite],
     );
     const resumedSite = await call("site.open", { siteId: secondSite });
-    assert.equal(resumedSite.site.id, secondSite);
-    assert.equal(resumedSite.site.public, false);
-    assert.deepEqual(
-      resumedSite.sites.map(({ id }) => id),
-      [secondSite, firstSite],
-    );
+    assert.equal(resumedSite.id, secondSite);
+    assert.equal(resumedSite.public, false);
+    assert.deepEqual(await call("site.latest"), resumedSite);
     await assert.rejects(call("browser.state", { browserId: id }));
     assert.deepEqual(await call("cron.running"), []);
     assert.deepEqual(await call("push.ack", { clientId: id, challengeId: id }), { ok: false });

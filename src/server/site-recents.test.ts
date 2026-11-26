@@ -32,7 +32,8 @@ test("only ready local sites can become recent, and visits remain ordered across
     expect(initial.sites).toHaveLength(2);
     expect(initial.sites).toEqual(expect.arrayContaining([a.descriptor, b.descriptor]));
     const openedEmpty = await recent.open(empty.descriptor.id);
-    expect(openedEmpty).toEqual({ ...initial, site: empty.descriptor });
+    expect(openedEmpty).toEqual(empty.descriptor);
+    expect(await recent.latest()).toEqual(initial.sites[0]);
     await expect(
       fs.access(path.join(stateDirPath(battyDir), "site-recents.json")),
     ).rejects.toMatchObject({ code: "ENOENT" });
@@ -44,14 +45,16 @@ test("only ready local sites can become recent, and visits remain ordered across
       recent.catalog(),
     ]);
     expect(outcomes[1]).toMatchObject({ status: "rejected", reason: { statusCode: 404 } });
-    expect(outcomes[2]).toMatchObject({ status: "fulfilled", value: { site: { public: true } } });
+    expect(outcomes[2]).toMatchObject({ status: "fulfilled", value: { public: true } });
     const order = [b.descriptor.id, a.descriptor.id];
     expect(outcomes[3]).toMatchObject({
       status: "fulfilled",
       value: { sites: order.map((id) => ({ id })) },
     });
     expect((await new SiteRecents(config).catalog()).sites.map(({ id }) => id)).toEqual(order);
+    expect(await recent.latest()).toEqual({ ...b.descriptor, public: true });
     await fs.unlink(path.join(b.directory, "index.html"));
+    expect(await recent.latest()).toEqual(a.descriptor);
     expect(await recent.catalog()).toEqual({ sites: [a.descriptor] });
   } finally {
     await fs.rm(battyDir, { recursive: true, force: true });

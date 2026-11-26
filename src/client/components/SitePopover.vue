@@ -6,7 +6,6 @@ import { withBaseUrl } from "@/client/lib/base-url";
 import { openSite } from "@/client/lib/api";
 import { createSiteMessageHandler } from "@/client/lib/site-functions";
 import type { SiteDescriptor } from "@/shared/types";
-import type { OwnerOutputs } from "@/shared/owner-api";
 
 const props = defineProps<{
   popoverId: string;
@@ -16,7 +15,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   toggle: [event: Event];
-  opened: [catalog: OwnerOutputs["site.open"]];
 }>();
 const frame = ref<HTMLIFrameElement>();
 const open = ref(false);
@@ -50,12 +48,15 @@ watch([open, siteId], ([isOpen, id], _previous, onCleanup) => {
 
 async function recordOpen(id: string, signal: AbortSignal): Promise<void> {
   try {
-    const result = await openSite(id);
-    if (!signal.aborted) emit("opened", result);
+    await openSite(id);
   } catch (error) {
     if (!signal.aborted)
       openError.value = `Could not save recent site: ${error instanceof Error ? error.message : String(error)}`;
   }
+}
+
+function navigateFromBlank(event: Event): void {
+  (event.currentTarget as HTMLIFrameElement).removeAttribute("srcdoc");
 }
 
 watch(frame, (element, _previous, onCleanup) => {
@@ -94,7 +95,9 @@ watch(frame, (element, _previous, onCleanup) => {
           ref="frame"
           class="site-popover__frame"
           :data-site-id="props.site.id"
+          srcdoc='<meta name="color-scheme" content="light dark">'
           :src="`${url}?batty_preview=${revision}`"
+          @load.once="navigateFromBlank"
           :title="props.site.name"
           :inert="props.previewInert || sharing"
           sandbox="allow-downloads allow-forms allow-modals allow-popups allow-scripts"
@@ -112,7 +115,7 @@ watch(frame, (element, _previous, onCleanup) => {
   width: 100%;
   height: 100%;
   border: 0;
-  background: white;
+  background: Canvas;
 }
 
 .site-popover__panel {

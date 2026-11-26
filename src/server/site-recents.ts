@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { SiteCatalog, VisitedSite } from "@/shared/owner-api";
+import type { SiteCatalog } from "@/shared/owner-api";
+import type { SiteDescriptor } from "@/shared/types";
 import { missingFile, publishJson } from "./artifact-storage";
 import type { AppConfig } from "./config";
 import { stateDirPath } from "./options";
-import { getSite, listStoredSites } from "./sites";
+import { getReadyStoredSite, getSite, listStoredSites } from "./sites";
 
 export class SiteRecents {
   private writes = Promise.resolve();
@@ -21,20 +22,28 @@ export class SiteRecents {
     return this.order(sites, recents);
   }
 
-  open(siteId: string): Promise<VisitedSite> {
+  async latest(): Promise<SiteDescriptor | null> {
+    await this.writes;
+    for (const id of await this.read()) {
+      const ready = await this.readySite(id);
+      if (ready) return ready.site;
+    }
+    return (await this.sites())[0] ?? null;
+  }
+
+  open(siteId: string): Promise<SiteDescriptor> {
     const write = this.writes.then(async () => {
-      const [sites, recents] = await Promise.all([this.sites(), this.read()]);
-      const ready = sites.find((site) => site.id === siteId);
+      const ready = await this.readySite(siteId);
       if (!ready) {
         const { descriptor } = await getSite(this.config.sitesDir, this.config.baseUrl, siteId);
-        return { ...this.order(sites, recents), site: descriptor };
+        return descriptor;
       }
-      const updated = [siteId, ...recents.filter((id) => id !== siteId)];
+      const recents = await this.read();
       if (recents[0] !== siteId) {
         await fs.mkdir(path.dirname(this.filename), { recursive: true });
-        await publishJson(this.filename, updated);
+        await publishJson(this.filename, [siteId, ...recents.filter((id) => id !== siteId)]);
       }
-      return { ...this.order(sites, updated), site: ready };
+      return ready.site;
     });
     this.writes = write.then(
       () => undefined,
@@ -50,6 +59,10 @@ export class SiteRecents {
       if (missingFile(error)) return [];
       throw error;
     }
+  }
+
+  private readySite(id: string) {
+    return getReadyStoredSite(this.config.sitesDir, this.config.baseUrl, id);
   }
 
   private async sites() {

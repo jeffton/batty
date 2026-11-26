@@ -172,6 +172,9 @@ export function getSite(siteId: string, signal?: AbortSignal) {
 export function getSiteCatalog(signal?: AbortSignal) {
   return query("site.catalog", {}, signal);
 }
+export function getLatestSite(signal?: AbortSignal) {
+  return query("site.latest", {}, signal);
+}
 export function openSite(siteId: string) {
   return value("site.open", { siteId });
 }

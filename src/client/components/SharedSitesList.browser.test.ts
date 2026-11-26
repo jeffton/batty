@@ -100,10 +100,7 @@ test("sandboxed nested site previews call functions and reject stale-document re
       (operation, input) => operation === "site.open" && input.siteId === site.descriptor.id,
     );
     await page.getByRole("button", { name: "Open site", exact: true }).click();
-    expect((await siteRead).value).toEqual({
-      site: site.descriptor,
-      sites: [site.descriptor],
-    });
+    expect((await siteRead).value).toEqual(site.descriptor);
     const frame = page.frameLocator("iframe");
     await frame.getByAltText("Fixture image").waitFor({ state: "visible" });
     await expect

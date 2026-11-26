@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { Check, SquareStack } from "@lucide/vue";
-import { onBeforeUnmount, ref, shallowRef } from "vue";
-import { getSiteCatalog } from "@/client/lib/api";
-import type { OwnerOutputs } from "@/shared/owner-api";
+import { nextTick, onBeforeUnmount, ref, shallowRef } from "vue";
+import { getLatestSite, getSiteCatalog } from "@/client/lib/api";
 import type { SiteDescriptor } from "@/shared/types";
 import BasePopover from "./BasePopover.vue";
 import LoadingIndicator from "./LoadingIndicator.vue";
@@ -16,18 +15,19 @@ const trigger = ref<HTMLButtonElement>();
 const choosing = ref(false);
 const loading = ref(false);
 const error = ref("");
+const catalogLoading = ref(false);
+const catalogError = ref("");
 let request: AbortController | undefined;
+let catalogRequest: AbortController | undefined;
 
-async function loadCatalog(): Promise<void> {
+async function loadLatest(): Promise<void> {
   request = new AbortController();
   const { signal } = request;
   loading.value = true;
   error.value = "";
   try {
-    const result = await getSiteCatalog(signal);
-    if (signal.aborted) return;
-    sites.value = result.sites;
-    activeSite.value = result.sites[0];
+    const site = await getLatestSite(signal);
+    if (!signal.aborted) activeSite.value = site ?? undefined;
   } catch (cause) {
     if (!signal.aborted) error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
@@ -37,13 +37,48 @@ async function loadCatalog(): Promise<void> {
 
 function handleToggle(event: Event): void {
   if ((event as ToggleEvent).newState === "open") {
-    void loadCatalog();
+    void loadLatest();
   } else {
     request?.abort();
+    catalogRequest?.abort();
     choosing.value = false;
     activeSite.value = undefined;
     sites.value = [];
   }
+}
+
+async function handleChooserToggle(event: Event): Promise<void> {
+  choosing.value = (event as ToggleEvent).newState === "open";
+  if (!choosing.value) {
+    catalogRequest?.abort();
+    return;
+  }
+
+  catalogRequest = new AbortController();
+  const { signal } = catalogRequest;
+  catalogLoading.value = true;
+  catalogError.value = "";
+  try {
+    const result = await getSiteCatalog(signal);
+    if (signal.aborted) return;
+    const firstLoad = sites.value.length === 0;
+    sites.value = result.sites;
+    if (firstLoad) await focusLoadedChoice(signal);
+  } catch (cause) {
+    if (!signal.aborted)
+      catalogError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    if (!signal.aborted) catalogLoading.value = false;
+  }
+}
+
+async function focusLoadedChoice(signal: AbortSignal): Promise<void> {
+  await nextTick();
+  if (signal.aborted) return;
+  const menu = chooser.value?.element;
+  const focused = document.activeElement;
+  if (focused === document.body || focused === trigger.value || focused === menu)
+    menu?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus({ preventScroll: true });
 }
 
 function closeChooser(): void {
@@ -56,12 +91,10 @@ function selectSite(site: SiteDescriptor): void {
   if (activeSite.value?.id !== site.id) activeSite.value = site;
 }
 
-function onSiteOpened(result: OwnerOutputs["site.open"]): void {
-  sites.value = result.sites;
-  activeSite.value = result.site;
-}
-
-onBeforeUnmount(() => request?.abort());
+onBeforeUnmount(() => {
+  request?.abort();
+  catalogRequest?.abort();
+});
 </script>
 
 <template>
@@ -71,7 +104,6 @@ onBeforeUnmount(() => request?.abort());
     label="Sites"
     :preview-inert="choosing"
     @toggle="handleToggle"
-    @opened="onSiteOpened"
   >
     <template v-if="activeSite" #actions>
       <button
@@ -90,10 +122,18 @@ onBeforeUnmount(() => request?.abort());
         anchor-down
         :boundary-id="props.popoverId"
         class="site-chooser"
-        @toggle="choosing = ($event as ToggleEvent).newState === 'open'"
+        @toggle="handleChooserToggle"
         @keydown.esc.stop.prevent="closeChooser"
       >
-        <ul class="site-chooser__list" role="list" aria-label="Available sites">
+        <LoadingIndicator
+          v-if="catalogLoading && !sites.length"
+          class="site-switcher__status"
+          label="Loading sites"
+        />
+        <p v-if="catalogError" class="site-switcher__status site-switcher__error" role="alert">
+          {{ catalogError }}
+        </p>
+        <ul v-if="sites.length" class="site-chooser__list" role="list" aria-label="Available sites">
           <li v-for="site in sites" :key="site.id">
             <button
               type="button"

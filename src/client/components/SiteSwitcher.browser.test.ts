@@ -2,6 +2,7 @@
 import path from "node:path";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser, type Page } from "patchright";
+import sharp from "sharp";
 import type { ViteDevServer } from "vite";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import type { SiteDescriptor } from "@/shared/types";
@@ -52,6 +53,7 @@ afterAll(async () => {
 async function siteFixture(page: Page, initialSites: SiteDescriptor[], initialRecent: string[]) {
   let sites = [...initialSites];
   let recent = [...initialRecent];
+  let latestCalls = 0;
   let catalogCalls = 0;
   const opened: string[] = [];
   const loaded: string[] = [];
@@ -61,6 +63,10 @@ async function siteFixture(page: Page, initialSites: SiteDescriptor[], initialRe
       ...recent.map((id) => sites.find((site) => site.id === id)!),
       ...sites.filter((site) => !recent.includes(site.id)),
     ],
+  });
+  await fixtureOperation(server, page, "site.latest", () => {
+    latestCalls++;
+    return { value: catalog().sites[0] ?? null };
   });
   await fixtureOperation(server, page, "site.catalog", () => {
     catalogCalls++;
@@ -73,7 +79,7 @@ async function siteFixture(page: Page, initialSites: SiteDescriptor[], initialRe
     const site = sites.find((site) => site.id === siteId)!;
     opened.push(siteId);
     recent = [siteId, ...recent.filter((id) => id !== siteId)];
-    return { value: { ...catalog(), site } };
+    return { value: site };
   });
   await fixtureOperation(server, page, "site.public", ({ siteId, public: isPublic }) => {
     const site = sites.find((site) => site.id === siteId)!;
@@ -94,6 +100,7 @@ async function siteFixture(page: Page, initialSites: SiteDescriptor[], initialRe
     add(site: SiteDescriptor) {
       sites = [...sites, site];
     },
+    latestCalls: () => latestCalls,
     catalogCalls: () => catalogCalls,
     loaded,
     opened,
@@ -103,6 +110,7 @@ async function siteFixture(page: Page, initialSites: SiteDescriptor[], initialRe
 
 test("opens the newest site with no visit history, then uses the most recent visit, including chat opens", async () => {
   const page = await browser.newPage();
+  page.setDefaultTimeout(5000);
   try {
     const state = await siteFixture(page, [], []);
     await page.goto(url);
@@ -137,7 +145,8 @@ test("opens the newest site with no visit history, then uses the most recent vis
       .getByRole("heading", { name: "Chat attachment" })
       .waitFor();
     await expect.poll(() => state.opened).toEqual(["newest", "attached", "attached"]);
-    expect(state.catalogCalls()).toBe(3);
+    expect(state.latestCalls()).toBe(3);
+    expect(state.catalogCalls()).toBe(0);
   } finally {
     await page.close();
   }
@@ -355,7 +364,7 @@ test.each([
       await activate(share);
       await copyLink(recent[0]!.id);
       expect(await publicity.isChecked()).toBe(false);
-      expect(state.catalogCalls()).toBe(2);
+      expect(state.latestCalls()).toBe(2);
       expect(state.opened).toEqual([recent[0]!.id, neverOpened.id, neverOpened.id, recent[0]!.id]);
       await activate(trigger);
       expect(await first.getAttribute("aria-current")).toBe("page");
@@ -365,6 +374,55 @@ test.each([
       expect(await launcher.evaluate((element) => element === document.activeElement)).toBe(true);
     } finally {
       await context.close();
+    }
+  },
+  30_000,
+);
+
+test.each(["dark", "light"] as const)(
+  "paints the loading area in the shell's %s theme without recoloring the loaded site",
+  async (colorScheme) => {
+    const page = await browser.newPage({ colorScheme });
+    const requested = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    try {
+      const site = descriptor("slow-site", "Slow site");
+      await siteFixture(page, [site], []);
+      await page.route(`**${site.url}?*`, async (route) => {
+        requested.resolve();
+        await release.promise;
+        await route.fulfill({
+          contentType: "text/html",
+          body: `<style>html { background: #f4efd7; }</style><h1>${site.name}</h1>`,
+        });
+      });
+      await page.goto(url);
+      await page.getByRole("button", { name: "Sites", exact: true }).click();
+      await requested.promise;
+      const frame = page.getByRole("dialog", { name: "Sites" }).locator("iframe");
+      const pixel = async () => {
+        const { x, y, width, height } = (await frame.boundingBox())!;
+        const clip = {
+          x: Math.floor(x + width / 2),
+          y: Math.floor(y + height / 2),
+          width: 1,
+          height: 1,
+        };
+        const rgb = await sharp(await page.screenshot({ clip }))
+          .removeAlpha()
+          .raw()
+          .toBuffer();
+        return [...rgb];
+      };
+      const [red, green, blue] = await pixel();
+      if (colorScheme === "dark") expect(Math.max(red!, green!, blue!)).toBeLessThan(80);
+      else expect(Math.min(red!, green!, blue!)).toBeGreaterThan(230);
+      release.resolve();
+      await frame.contentFrame().getByRole("heading", { name: site.name }).waitFor();
+      await expect.poll(pixel).toEqual([244, 239, 215]);
+    } finally {
+      release.resolve();
+      await page.close();
     }
   },
   30_000,

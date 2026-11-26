@@ -68,19 +68,23 @@ async function readManifest(rootDir: string, siteId: string): Promise<SiteManife
 export async function listStoredSites(rootDir: string, baseUrl: string) {
   const records: { site: SiteDescriptor; createdAt: number }[] = [];
   for (const directory of await storageDirectories(rootDir)) {
-    try {
-      const id = path.basename(directory);
-      const manifest = await readManifest(rootDir, id);
-      if (manifest.id !== id) continue;
-      const index = await resolveSiteContent(rootDir, id, "index.html");
-      if (index.size > 0)
-        records.push({ site: descriptor(manifest, baseUrl), createdAt: manifest.createdAt });
-    } catch (error) {
-      const status = (error as { statusCode?: number }).statusCode;
-      if (status !== 404 && status !== 400) throw error;
-    }
+    const record = await getReadyStoredSite(rootDir, baseUrl, path.basename(directory));
+    if (record) records.push(record);
   }
   return records;
+}
+
+export async function getReadyStoredSite(rootDir: string, baseUrl: string, id: string) {
+  try {
+    if (!(await fs.lstat(siteDirectory(rootDir, id))).isDirectory()) return;
+    const manifest = await readManifest(rootDir, id);
+    if (manifest.id === id && (await resolveSiteContent(rootDir, id, "index.html")).size > 0)
+      return { site: descriptor(manifest, baseUrl), createdAt: manifest.createdAt };
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status !== 404 && status !== 400 && (error as NodeJS.ErrnoException).code !== "ENOENT")
+      throw error;
+  }
 }
 
 export async function createSite(

@@ -79,7 +79,7 @@ function cronRunLog(runtime: Runtime, run: CronRun, jobs: CronJob[]): CronRunLog
     runId: run.id,
     jobId: run.jobId,
     workspaceId: run.workspaceId,
-    prompt: job?.prompt ?? "",
+    title: run.job?.title ?? job?.title ?? "Cron run",
     model: job?.model ?? `${config.defaultProvider}/${config.defaultModel}`,
     thinkingLevel: job?.thinkingLevel ?? config.defaultThinkingLevel,
     scheduleLabel: job ? scheduleLabel(job.schedule) : "",

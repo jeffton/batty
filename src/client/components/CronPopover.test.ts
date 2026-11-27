@@ -52,7 +52,7 @@ describe("cron popover", () => {
       runId: "run-second",
       jobId: "second",
       workspaceId: "second",
-      prompt: "Job in second",
+      title: "Job in second",
       model: "provider/model",
       thinkingLevel: "medium",
       scheduleLabel: "Every 1h",
@@ -111,6 +111,7 @@ describe("cron popover", () => {
       const rows = wrapper.get("#cron-test-logs-panel").findAll(".cron-popover__run");
       expect(rows[0]!.element.tagName).toBe("BUTTON");
       expect(rows[0]!.attributes("popovertarget")).toBe("cron-test-cron-run-second");
+      expect(rows[0]!.attributes("aria-label")).toBe("Open cron run session: Job in second");
       expect(rows[0]!.text()).toContain("Job in second");
       expect(rows[1]!.element.tagName).toBe("ARTICLE");
       expect(rows[1]!.attributes("popovertarget")).toBeUndefined();

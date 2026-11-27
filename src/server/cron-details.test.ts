@@ -6,6 +6,8 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import { OrchestrationDoc } from "./orchestration";
 import { registerCronRoutes } from "./routes/cron";
 import { parseCronArgs } from "./cron-cli";
+import { createOwnerRpcHandler, type OwnerRpcServices } from "./owner-rpc";
+import type { Runtime } from "./runtime";
 
 test("compact cron list and explicit details preserve full jobs and workspace filtering", async () => {
   const { orchestration, open } = await fixture();
@@ -135,7 +137,7 @@ test("cron requires explicit nonblank titles on creation, import and rename", as
   expect((await orchestration.getJob(job.id)).title).toBe("Review");
 });
 
-test("renaming an executing one-shot preserves successful retirement", async () => {
+test("renaming an executing one-shot preserves successful retirement and its run title", async () => {
   const { orchestration, open, faux } = await fixture(50);
   const { main } = await open();
   faux.setResponses([
@@ -158,8 +160,18 @@ test("renaming an executing one-shot preserves successful retirement", async () 
   await until(async () => Date.now() > run!.startedAt);
   const renamed = await orchestration.updateJob(job.id, { title: "Renamed one-shot" });
   expect(renamed.updatedAt).toBe(job.updatedAt);
+  const owner = createOwnerRpcHandler(
+    { config: {}, orchestration, tools: {} } as Runtime,
+    {} as OwnerRpcServices,
+  );
+  const rpc = { signal: new AbortController().signal };
+  const logs = () => owner("workspace.cron.logs", { workspaceId: job.workspaceId }, rpc);
+  expect((await logs()).value).toMatchObject([{ runId: run!.id, title: "One-shot" }]);
   await until(async () => (await orchestration.listRunLogs(job.id))[0]?.status === "completed");
   expect(await orchestration.listJobs()).toEqual([]);
+  expect((await logs()).value).toMatchObject([
+    { runId: run!.id, title: "One-shot", status: "success" },
+  ]);
   await expect(orchestration.getJob(job.id)).rejects.toThrow("Unknown cron job");
 }, 15000);
 

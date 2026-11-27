@@ -40,7 +40,7 @@ const tasks = computed(() => {
       : []),
     ...runningCron.map((run) => ({
       id: `cron-${run.runId}`,
-      title: run.prompt,
+      title: run.title,
       detail: `Cron · ${run.workspaceId}`,
       sessionId: run.sessionId,
       error: undefined,

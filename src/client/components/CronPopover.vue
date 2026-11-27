@@ -160,14 +160,14 @@ onBeforeUnmount(() => {
               class="cron-popover__run"
               :type="run.sessionId ? 'button' : undefined"
               :popovertarget="run.sessionId ? sessionPopoverId('cron', run.runId) : undefined"
-              :aria-label="run.sessionId ? `Open cron run session: ${run.prompt}` : undefined"
+              :aria-label="run.sessionId ? `Open cron run session: ${run.title}` : undefined"
             >
               <span class="cron-popover__run-content">
                 <span class="cron-popover__run-heading">
                   <span class="cron-popover__status">{{ statusLabel(run.status) }}</span>
                   <strong>{{ run.scheduleLabel }}</strong>
                 </span>
-                <span class="cron-popover__run-prompt">{{ run.prompt }}</span>
+                <span class="cron-popover__run-prompt">{{ run.title }}</span>
                 <span class="cron-popover__run-details">
                   <span>{{ workspaceLabel(run.workspaceId) }}</span>
                   <span>{{ formatTimestamp(run.startedAtMs) }}</span>

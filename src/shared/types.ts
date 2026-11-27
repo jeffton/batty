@@ -236,7 +236,7 @@ export interface RunningCronJob {
   runId: string;
   jobId: string;
   workspaceId: string;
-  prompt: string;
+  title: string;
   model: string;
   thinkingLevel?: string;
   scheduleLabel: string;

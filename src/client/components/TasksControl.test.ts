@@ -14,7 +14,7 @@ const agent = {
 const run = {
   runId: "run",
   sessionId: "cron",
-  prompt: "Publish news",
+  title: "Publish news",
   workspaceId: "roy",
   status: "running",
 } as CronRunLog;
@@ -139,22 +139,24 @@ describe("compose tasks", () => {
   });
 
   it("combines memory, running cron and subagents without completed or duplicate sessions", async () => {
+    const reminder = { ...run, runId: "reminder", title: "Kontorpause · desk", sessionId: "desk" };
     const wrapper = mount(TasksControl, {
       props: {
         memoryPending: 3,
         subagents: [agent, { ...agent, sessionId: "cron" }],
-        cronRuns: [run, { ...run, runId: "done", status: "success" }],
+        cronRuns: [run, reminder, { ...run, runId: "done", status: "success" }],
       },
       global: {
         stubs: { BasePopover: { template: "<div><slot /></div>" }, SubagentSessionPopover: true },
       },
     });
     try {
-      expect(wrapper.get(".tasks-control").text()).toBe("3 tasks");
+      expect(wrapper.get(".tasks-control").text()).toBe("4 tasks");
       const rows = wrapper.findAll(".tasks-popover__task");
       expect(rows.map((row) => row.get("strong").text())).toEqual([
         "Preparing memory",
         "Publish news",
+        "Kontorpause · desk",
         "Research",
       ]);
       expect(rows[0]!.element.tagName).toBe("ARTICLE");
@@ -162,7 +164,8 @@ describe("compose tasks", () => {
       expect(rows[1]!.element.tagName).toBe("BUTTON");
       expect(rows[1]!.attributes("popovertarget")).toContain("cron-run");
       expect(rows[2]!.element.tagName).toBe("BUTTON");
-      expect(rows[2]!.attributes("popovertarget")).toContain("agent-agent");
+      expect(rows[2]!.attributes("popovertarget")).toContain("cron-reminder");
+      expect(rows[3]!.attributes("popovertarget")).toContain("agent-agent");
       await wrapper.setProps({
         memoryPending: 0,
         subagents: [],

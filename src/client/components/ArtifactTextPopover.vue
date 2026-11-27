@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Download, WrapText } from "@lucide/vue";
+import { Download } from "@lucide/vue";
 import type { CodeView } from "@pierre/diffs";
-import { onBeforeUnmount, ref, watch } from "vue";
-import { codeViewOptions, mountCodeView } from "@/client/lib/code-view";
+import { onBeforeUnmount, ref } from "vue";
+import { mountCodeView } from "@/client/lib/code-view";
 import type { SentFileDescriptor } from "@/shared/types";
 import AttachedFileDownload from "./AttachedFileDownload.vue";
 import FullPopover from "./FullPopover.vue";
@@ -10,7 +10,6 @@ import LoadingIndicator from "./LoadingIndicator.vue";
 
 const props = defineProps<{ popoverId: string; file: SentFileDescriptor; previewUrl: string }>();
 const root = ref<HTMLElement>();
-const wrap = ref(true);
 const loading = ref(false);
 const empty = ref(false);
 const truncated = ref(false);
@@ -58,7 +57,7 @@ async function open(): Promise<void> {
     }
     const { CodeView } = await import("@pierre/diffs");
     if (signal.aborted) return;
-    view = mountCodeView(CodeView, root.value!, wrap.value);
+    view = mountCodeView(CodeView, root.value!);
     view.setItems([{ id: props.file.id, type: "file", file: { name: props.file.name, contents } }]);
   } catch (cause) {
     if (!signal.aborted) error.value = cause instanceof Error ? cause.message : String(cause);
@@ -72,7 +71,6 @@ function handleToggle(event: Event): void {
   else cleanUp();
 }
 
-watch(wrap, (enabled) => view?.setOptions(codeViewOptions(enabled)));
 onBeforeUnmount(cleanUp);
 </script>
 
@@ -86,16 +84,6 @@ onBeforeUnmount(cleanUp);
     @toggle="handleToggle"
   >
     <template #header-actions>
-      <button
-        type="button"
-        class="chrome-button chrome-button--icon"
-        aria-label="Wrap lines"
-        title="Wrap lines"
-        :aria-pressed="wrap"
-        @click="wrap = !wrap"
-      >
-        <WrapText :size="18" aria-hidden="true" />
-      </button>
       <AttachedFileDownload
         :file="props.file"
         class="chrome-button chrome-button--icon"

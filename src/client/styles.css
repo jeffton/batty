@@ -335,6 +335,7 @@ button,
 
 .chrome-button--icon {
   width: var(--button-size);
+  height: var(--button-size);
   padding: 0;
 }
 

@@ -200,7 +200,7 @@ test.each([
         {
           path: "/api/sent-files/work/1/tool/output",
           name: "output.ts",
-          text: `export const message = "${"A long highlighted line ".repeat(20)}";`,
+          text: `export const message = "${"A long highlighted line ".repeat(15)}${"anUnbrokenIdentifier".repeat(8)}";`,
           source: "assistant",
         },
       ];
@@ -247,26 +247,40 @@ test.each([
           ).toBe(Boolean(sample.tail));
           if (sample.source === "assistant") {
             await expect.poll(() => line.locator("span").count()).toBeGreaterThan(1);
-            const lineHeight = () =>
-              line.evaluate((element) => element.getBoundingClientRect().height);
-            const wrapped = await lineHeight();
-            const wrap = preview.getByRole("button", { name: "Wrap lines" });
-            expect(await wrap.getAttribute("aria-pressed")).toBe("true");
-            await activate(wrap);
-            expect(await wrap.getAttribute("aria-pressed")).toBe("false");
-            await expect.poll(lineHeight).toBeLessThan(wrapped);
-            await activate(wrap);
-            await expect.poll(lineHeight).toBe(wrapped);
+            expect(
+              await line.evaluate((element) => ({
+                wraps:
+                  element.getBoundingClientRect().height >
+                  parseFloat(getComputedStyle(element).lineHeight),
+                fits: element.scrollWidth === element.clientWidth,
+              })),
+            ).toEqual({ wraps: true, fits: true });
+            expect(await preview.getByRole("button", { name: "Wrap lines" }).count()).toBe(0);
           }
         }
-        const download = page.waitForEvent("download");
-        await activate(preview.getByRole("link", { name: "Download file" }));
-        const result = await download;
+        const downloadLink = preview.getByRole("link", { name: "Download file" });
+        const closeButton = preview.getByRole("button", { name: "Close file preview" });
+        const { width: buttonWidth, height: buttonHeight } = (await closeButton.boundingBox())!;
+        expect(await downloadLink.boundingBox()).toMatchObject({
+          width: buttonWidth,
+          height: buttonHeight,
+        });
+        if (!touch) {
+          await closeButton.focus();
+          await page.keyboard.press("Shift+Tab");
+          expect(await downloadLink.evaluate((element) => element.matches(":focus-visible"))).toBe(
+            true,
+          );
+        }
+        const [result] = await Promise.all([
+          page.waitForEvent("download"),
+          touch ? activate(downloadLink) : page.keyboard.press("Enter"),
+        ]);
         expect(result.suggestedFilename()).toBe(sample.name);
         expect(await buffer(await result.createReadStream())).toEqual(
           sample.bytes ?? Buffer.from(sample.text + (sample.tail ?? "")),
         );
-        await activate(preview.getByRole("button", { name: "Close file preview" }));
+        await activate(closeButton);
         await preview.waitFor({ state: "hidden" });
         expect(await card.getByRole("link", { name: "Download", exact: true }).isVisible()).toBe(
           true,

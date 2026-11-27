@@ -706,6 +706,10 @@ async function copyAssistantMarkdown(): Promise<void> {
   display: block;
 }
 
+.message__notice-files {
+  --attached-file-action-color: color-mix(in oklch, var(--color-info) 75%, var(--color-text));
+}
+
 .message__notice-files :deep(.attached-files__card),
 .message__notice-sites :deep(.shared-sites__card),
 .message__notice-sites :deep(.shared-sites__open) {
@@ -720,7 +724,6 @@ async function copyAssistantMarkdown(): Promise<void> {
 }
 
 .message__notice-files :deep(.attached-files__facts),
-.message__notice-files :deep(.attached-files__download),
 .message__notice-files :deep(.transcript-image__error),
 .message__notice-sites :deep(.shared-sites__meta span) {
   color: inherit;

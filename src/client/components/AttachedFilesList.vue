@@ -69,7 +69,7 @@ function formatFileSize(size: number): string {
         <template v-if="isTextArtifactCandidate(file)">
           <button
             type="button"
-            class="chrome-button"
+            class="attached-files__action"
             :popovertarget="previewId(file.id)"
             :aria-label="`Preview ${file.name}`"
           >
@@ -81,7 +81,7 @@ function formatFileSize(size: number): string {
             :preview-url="artifactTextUrl(file.downloadUrl)"
           />
         </template>
-        <AttachedFileDownload :file="file" class="attached-files__download" />
+        <AttachedFileDownload :file="file" class="attached-files__action" />
       </div>
     </article>
   </div>
@@ -139,10 +139,25 @@ function formatFileSize(size: number): string {
   gap: 0.35rem;
 }
 
-.attached-files__actions :deep(.attached-files__download) {
-  color: var(--color-accent);
-  text-decoration: none;
+.attached-files__actions :deep(.attached-files__action) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--button-size);
+  min-height: var(--button-size);
+  padding: 0 0.45rem;
+  border: 0;
+  border-radius: var(--chrome-control-radius);
+  background: transparent;
+  color: var(--attached-file-action-color, var(--color-link));
+  font: inherit;
   font-weight: 600;
+  text-decoration: none;
+}
+
+.attached-files__actions :deep(.attached-files__action:focus-visible) {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
 }
 
 .attached-files__actions :deep([role="alert"]) {
@@ -150,7 +165,7 @@ function formatFileSize(size: number): string {
 }
 
 @media (hover: hover) {
-  .attached-files__actions :deep(.attached-files__download:hover) {
+  .attached-files__actions :deep(.attached-files__action:hover) {
     text-decoration: underline;
   }
 }

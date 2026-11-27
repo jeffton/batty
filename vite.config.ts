@@ -13,6 +13,7 @@ const mockedServerTests = [
   "src/server/cloud-browser.test.ts",
   "src/server/websocket-registration.test.ts",
   "src/server/network-probe.test.ts",
+  "src/server/maintenance-diagnostics.test.ts",
   "src/server/routes/assistant-agents.test.ts",
 ];
 

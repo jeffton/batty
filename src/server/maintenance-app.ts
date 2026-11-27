@@ -65,12 +65,13 @@ export async function createMaintenanceApp(
     const state = await readMaintenance(root);
     if (!state) return { active: false };
     if (!isOwner(request.cookies[config.cookieName])) return { active: true, authenticated: false };
-    const { id, phase, message, progress, startedAt, updatedAt, model } = state;
+    const { id, phase, task, message, progress, startedAt, updatedAt, model } = state;
     return {
       active: true,
       authenticated: true,
       id,
       phase,
+      task,
       message,
       progress,
       startedAt,

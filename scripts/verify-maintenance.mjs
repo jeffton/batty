@@ -36,6 +36,8 @@ const secret = "fixture auth secret";
 const state = {
   id: "fixture",
   phase: "offline",
+  task: "Database migration",
+  context: "Original database is unchanged; validate the copy before swapping.",
   message: "Copying the test database",
   progress: 37,
   startedAt: Date.now(),
@@ -111,11 +113,17 @@ try {
   page.on("pageerror", (error) => failures.push(error.message));
   assert.equal((await page.goto(origin)).status(), 503);
   await page.getByText(state.message).waitFor();
+  await page.getByText(state.task).waitFor();
   assert.equal(await page.getByRole("progressbar").getAttribute("value"), "37");
-  await page.getByRole("textbox", { name: "Question" }).fill("How is the copy going?");
-  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await page.keyboard.press("Tab");
+  const question = page.getByRole("textbox", { name: "Question" });
+  assert.equal(await question.evaluate((input) => input.matches(":focus-visible")), true);
+  await page.keyboard.type("How is the copy going?");
+  await page.keyboard.press("Enter");
   await page.getByText("The copy is 37% complete.").waitFor();
   assert.equal(toolRead.progress, 37);
+  assert.equal(toolRead.task, state.task);
+  assert.equal(toolRead.context, state.context);
   assert.deepEqual(failures, []);
 
   // A fresh mobile tab cannot see private status until a real WebAuthn sign-in.
@@ -129,6 +137,7 @@ try {
   await phone.goto(origin + "/maintenance/");
   await phone.getByRole("button", { name: "Sign in with a passkey" }).waitFor();
   assert.equal(await phone.getByText(state.message).count(), 0);
+  assert.equal(await phone.getByText(state.task).count(), 0);
   const cdp = await mobile.newCDPSession(phone);
   await cdp.send("WebAuthn.enable");
   await cdp.send("WebAuthn.addVirtualAuthenticator", {
@@ -149,7 +158,7 @@ try {
     return (await navigator.credentials.create({ publicKey })).toJSON();
   }, enrollment.optionsJSON);
   await passkeys.finishRegistration(enrollment.requestId, credential, origin, "localhost");
-  await phone.getByRole("button", { name: "Sign in with a passkey" }).click();
+  await phone.getByRole("button", { name: "Sign in with a passkey" }).tap();
   await phone.getByText(state.message).waitFor();
   assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 390);
   await phone.locator(".illustration").evaluate((image) => image.decode());

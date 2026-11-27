@@ -9,9 +9,17 @@ export interface MaintenanceModel {
   thinkingLevel: ModelThinkingLevel;
 }
 
+export interface MaintenanceJob {
+  unit: string;
+  invocationId: string;
+}
+
 export interface MaintenanceState {
   id: string;
   phase: "offline" | "starting";
+  task?: string;
+  context?: string;
+  job?: MaintenanceJob;
   message: string;
   progress: number | null;
   startedAt: number;

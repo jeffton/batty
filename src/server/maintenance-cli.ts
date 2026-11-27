@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { createAuthToken } from "./auth";
 import { loadConfig } from "./config";
 import { acquireLock } from "./lock";
+import { identifyMaintenanceJob } from "./maintenance-diagnostics";
 import {
   clearMaintenance,
   mainLoopback,
@@ -14,12 +15,15 @@ import {
 } from "./maintenance-state";
 
 export const maintenanceHelp = `Usage: batty2 [--root /var/lib/batty2] maintenance ACTION [options]
-  enter       --url HTTPS_ORIGIN --message TEXT [--progress PERCENT]
-  update      [--message TEXT] [--progress PERCENT|indeterminate]
-  allow-start [--message TEXT] [--progress PERCENT|indeterminate]
-  hold        [--message TEXT] [--progress PERCENT|indeterminate]
+  enter       --url HTTPS_ORIGIN --message TEXT [status options]
+  update      [status options]
+  allow-start [status options]
+  hold        [status options]
   exit
   status
+Status options: --task TEXT --context TEXT --job-unit RUNNING.service
+                --message TEXT --progress PERCENT|indeterminate
+Context is for non-secret checkpoints, known blockers and handoff notes.
 Enter redirects public traffic; stop Batty and wait for it to checkpoint before migrating.
 Allow-start permits main to open its DB again without exposing it publicly.
 Exit requires a healthy Batty listener. All commands report JSON.`;
@@ -31,6 +35,9 @@ export async function runMaintenanceCli(args: string[]) {
     options: {
       root: { type: "string", default: "/var/lib/batty2" },
       message: { type: "string" },
+      task: { type: "string" },
+      context: { type: "string" },
+      "job-unit": { type: "string" },
       url: { type: "string" },
       progress: { type: "string" },
       help: { type: "boolean" },
@@ -43,14 +50,21 @@ export async function runMaintenanceCli(args: string[]) {
   const [command, action, extra] = positionals;
   const editing = ["enter", "update", "allow-start", "hold"].includes(action ?? "");
   const message = values.message?.trim();
-  if (command !== "maintenance" || extra || (!editing && action !== "exit" && action !== "status"))
-    throw new Error(maintenanceHelp);
+  const task = values.task?.trim();
+  const context = values.context?.trim();
+  const jobUnit = values["job-unit"];
+  const hasUpdate = [message, task, context, jobUnit, values.progress].some(
+    (value) => value !== undefined,
+  );
   if (
-    (!editing && (values.message !== undefined || values.progress !== undefined)) ||
-    (values.message !== undefined && !message) ||
+    command !== "maintenance" ||
+    extra ||
+    (!editing && (hasUpdate || (action !== "exit" && action !== "status"))) ||
+    message === "" ||
+    task === "" ||
     (action === "enter" && (!message || !values.url)) ||
     (action !== "enter" && values.url !== undefined) ||
-    (action === "update" && !message && values.progress === undefined)
+    (action === "update" && !hasUpdate)
   )
     throw new Error(maintenanceHelp);
 
@@ -89,10 +103,14 @@ export async function runMaintenanceCli(args: string[]) {
         },
       );
       const model = (await reply.json()) as MaintenanceModel;
+      const job = jobUnit === undefined ? undefined : await identifyMaintenanceJob(jobUnit);
       const now = Date.now();
       await writeMaintenance(root, {
         id: randomUUID(),
         phase: "offline",
+        task,
+        context: context || undefined,
+        job,
         message: message!,
         progress: progress ?? null,
         startedAt: now,
@@ -121,17 +139,23 @@ export async function runMaintenanceCli(args: string[]) {
           throw new Error("Batty did not report healthy");
         await clearMaintenance(root);
       } else {
+        const job = jobUnit === undefined ? state.job : await identifyMaintenanceJob(jobUnit);
         await writeMaintenance(root, {
           ...state,
           phase:
             action === "allow-start" ? "starting" : action === "hold" ? "offline" : state.phase,
+          task: task ?? state.task,
+          context: context === undefined ? state.context : context || undefined,
+          job,
           message: message ?? state.message,
           progress: progress === undefined ? state.progress : progress,
           updatedAt: Date.now(),
         });
       }
     }
-    console.log(JSON.stringify((await readMaintenance(root)) ?? { active: false }));
+    const updated = await readMaintenance(root);
+    if (updated) delete updated.context;
+    console.log(JSON.stringify(updated ?? { active: false }));
   } finally {
     await unlock();
   }

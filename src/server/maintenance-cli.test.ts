@@ -46,19 +46,45 @@ test.runIf(process.platform === "linux")(
         }),
       );
       const enter = () =>
-        run("enter", "--url", "https://batty.fixture.test", "--message", "Starting");
+        run(
+          "enter",
+          "--url",
+          "https://batty.fixture.test",
+          "--message",
+          "Starting",
+          "--task",
+          "Migration",
+          "--context",
+          "Original database has not been changed",
+        );
       await expect(enter()).rejects.toThrow("gateway is not routing");
       expect(await readMaintenance(root)).toBeUndefined();
       gated = true;
       await enter();
+      expect(JSON.parse(output.mock.lastCall![0])).not.toHaveProperty("context");
+      await run("status");
+      expect(JSON.parse(output.mock.lastCall![0]).context).toBe(
+        "Original database has not been changed",
+      );
       const state = (await readMaintenance(root))!;
-      expect(state).toMatchObject({ phase: "offline", model, progress: null });
+      expect(state).toMatchObject({
+        task: "Migration",
+        context: "Original database has not been changed",
+        phase: "offline",
+        model,
+        progress: null,
+      });
       await run("update", "--progress", "41.5");
       expect(await readMaintenance(root)).toMatchObject({
         id: state.id,
+        task: "Migration",
+        context: state.context,
         phase: "offline",
         progress: 41.5,
       });
+      await run("update", "--context", "");
+      await run("status");
+      expect(JSON.parse(output.mock.lastCall![0])).not.toHaveProperty("context");
       await expect(run("exit")).rejects.toThrow("allow-start");
       await run("allow-start", "--message", "Booting", "--progress", "indeterminate");
       await expect(run("exit")).rejects.toThrow("/healthz returned HTTP 503");

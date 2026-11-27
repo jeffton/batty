@@ -11,6 +11,7 @@ type Status =
       active: true;
       authenticated: true;
       id: string;
+      task?: string;
       message: string;
       progress: number | null;
       model: string;
@@ -137,6 +138,7 @@ onUnmounted(() => {
     <img class="illustration" :src="illustration" alt="" width="512" height="512" />
     <h1 id="title">Batty is under maintenance</h1>
     <div class="status" role="status">
+      <p v-if="owner?.task" class="task">{{ owner.task }}</p>
       <p v-if="owner">{{ owner.message }}</p>
       <div class="meter">
         <progress
@@ -229,6 +231,11 @@ h1 {
 }
 .status p {
   margin: 0 0 0.4rem;
+}
+.status .task {
+  color: var(--color-text);
+  font-weight: 600;
+  margin-bottom: 0.125rem;
 }
 .meter {
   display: flex;

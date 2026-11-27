@@ -99,14 +99,7 @@ export function authenticateNode(
 export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
   const remotes = runtime.remotes;
   const access = remotes.access;
-  app.get("/api/remotes", async () => ({
-    ...access.identity(),
-    grants: access.listInvitations(),
-    connections: access.listConnections().map((connection) => ({
-      ...connection,
-      status: remotes.reverse.status(connection.id),
-    })),
-  }));
+  app.get("/api/remotes", () => executeRemoteOwnerOperation(runtime, "remotes.get"));
   app.post<{
     Body: {
       action: string;

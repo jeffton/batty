@@ -1,6 +1,11 @@
+import { cronCommand } from "./cron-command";
 import { modelChange } from "./orchestration-worker-config.js";
 import { NETWORK_RETRY_MS } from "./network-recovery.js";
-import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
+import {
+  archiveCronRun,
+  archiveWorker,
+  removeCompletedOneShot,
+} from "./orchestration-lifecycle.js";
 import { randomUUID } from "node:crypto";
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -107,8 +112,7 @@ export function createCronScheduler(
               : "failed";
         current.finishedAt = Date.now();
         removeCompletedOneShot(doc.jobs, current);
-        Object.assign(await tx.doc(ArchivedRun, current.id, current), current);
-        delete doc.runs[current.id];
+        await archiveCronRun(tx, doc.runs, current);
         await archiveWorker(tx, current.sessionId, current.taskId);
       }, context);
     }
@@ -118,15 +122,15 @@ export function createCronScheduler(
     if (closed) return;
     const now = Date.now();
     const running = new Set((await listRunningCron()).map((run) => run.jobId));
-    const jobs = (await listJobs()).filter((job) => !running.has(job.id));
-    const due = jobs.some(
-      (job) =>
+    const due = (await listJobs()).filter(
+      (job): job is CronJob & { nextAt: number } =>
+        !running.has(job.id) &&
         job.enabled &&
         job.nextAt !== undefined &&
         job.nextAt <= now &&
         (job.retryAt === undefined || job.retryAt <= now),
     );
-    if (due) {
+    if (due.length) {
       if (networkRetryAt > now) return;
       if (!(await networkAvailable())) {
         networkRetryAt = Date.now() + NETWORK_RETRY_MS;
@@ -135,14 +139,7 @@ export function createCronScheduler(
       networkRetryAt = 0;
       if (closed) return;
     }
-    for (const job of jobs) {
-      if (
-        !job.enabled ||
-        job.nextAt === undefined ||
-        job.nextAt > now ||
-        (job.retryAt !== undefined && job.retryAt > now)
-      )
-        continue;
+    for (const job of due) {
       try {
         const ws = await services.workspace(job.workspaceId);
         const agent = await services.main.agent(context);
@@ -197,7 +194,7 @@ export function createCronScheduler(
             id: runId,
             jobId: job.id,
             workspaceId: ws.id,
-            scheduledAt: job.nextAt!,
+            scheduledAt: job.nextAt,
             startedAt: now,
             taskId,
             sessionId: String(child),
@@ -205,7 +202,7 @@ export function createCronScheduler(
             job: structuredClone(job),
           };
           await indexRun(tx, doc.runs[runId]!);
-          current.nextAt = advanceSchedule(current.schedule, job.nextAt!, now);
+          current.nextAt = advanceSchedule(current.schedule, job.nextAt, now);
           delete current.retryAt;
           if (current.nextAt === undefined) {
             current.enabled = false;
@@ -364,6 +361,17 @@ export function createCronScheduler(
     if (!run) throw new Error(`Unknown cron run: ${runId}`);
     await services.harness.abortTask(run.taskId, context);
   };
+  const commands = {
+    listJobSummaries,
+    getJob,
+    importJob,
+    addJob,
+    updateJob,
+    removeJob,
+    listRunningCron,
+    listRunLogs,
+    stopRunning,
+  };
   const cron = defineTool({
     name: "cron",
     description:
@@ -391,58 +399,25 @@ export function createCronScheduler(
         ]),
       ),
     }),
-    execute: async (args, api) => {
-      let result: unknown;
-      switch (args.action) {
-        case "list":
-          result = await listJobSummaries(args.workspaceId);
-          break;
-        case "get":
-          result = await getJob(args.jobId!);
-          break;
-        case "add":
-          result = await addJob({
-            ...args,
-            workspaceId: (await services.workspace(args.workspaceId, api.conversationId)).id,
-          } as CronJobInput);
-          break;
-        case "update":
-          result = await updateJob(args.jobId!, args as Partial<CronJobInput>);
-          break;
-        case "remove":
-          await removeJob(args.jobId!);
-          result = "Removed.";
-          break;
-        case "list-running":
-          result = await listRunningCron(args.jobId);
-          break;
-        case "list-run-logs":
-          result = await listRunLogs(args.jobId, args.limit, args.workspaceId);
-          break;
-        case "stop-running": {
-          if (args.runId) await stopRunning(args.runId);
-          else for (const run of await listRunningCron(args.jobId)) await stopRunning(run.id);
-          result = "Stopped.";
-          break;
-        }
-        default:
-          throw new Error(`Unknown cron action: ${args.action}`);
-      }
-      return reply(typeof result === "string" ? result : JSON.stringify(result));
+    execute: async (args, api): Promise<ReturnType<typeof reply>> => {
+      if (args.action === "import") throw new Error("Unknown cron action: import");
+      const input =
+        args.action === "add"
+          ? {
+              ...args,
+              workspaceId: (await services.workspace(args.workspaceId, api.conversationId)).id,
+            }
+          : args;
+      const result = await cronCommand(commands, input);
+      if (args.action === "remove") return reply("Removed.");
+      if (args.action === "stop-running") return reply("Stopped.");
+      return reply(JSON.stringify(result));
     },
   });
   return {
     cron,
     listJobs,
-    listJobSummaries,
-    getJob,
-    listRunLogs,
-    listRunningCron,
-    addJob,
-    importJob,
-    updateJob,
-    removeJob,
-    stopRunning,
+    ...commands,
     tick,
     async start() {
       closed = false;

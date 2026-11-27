@@ -1,4 +1,8 @@
-import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
+import {
+  archiveCronRun,
+  archiveWorker,
+  removeCompletedOneShot,
+} from "./orchestration-lifecycle.js";
 import { orchestrationHooks } from "./orchestration-hooks.js";
 import { presentationHook } from "./presentation-hook";
 
@@ -221,12 +225,12 @@ export function createOrchestration(
         if (task?.state.status === "terminal") {
           await main.commit(async (tx) => {
             await archiveWorker(tx, String(worker.id), worker.active!);
-            for (const [id, run] of Object.entries((await tx.doc(OrchestrationDoc)).runs)) {
+            const { runs } = await tx.doc(OrchestrationDoc);
+            for (const run of Object.values(runs)) {
               if (run.taskId !== worker.active) continue;
               run.status = "failed";
               run.finishedAt = Date.now();
-              Object.assign(await tx.doc(ArchivedRun, run.id, run), run);
-              delete (await tx.doc(OrchestrationDoc)).runs[id];
+              await archiveCronRun(tx, runs, run);
             }
           }, context);
         } else if (task)

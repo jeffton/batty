@@ -61,6 +61,16 @@ import type { SessionState, SessionMessagesPage, UiMessage, ModelOption } from "
 export const context = BACKGROUND_CONTEXT;
 const PAGE_SIZE = 120;
 
+function defaultAgentModel(config: AppConfig) {
+  return {
+    model: {
+      provider: config.defaultProvider ?? "openai-codex",
+      modelId: config.defaultModel ?? "gpt-6.1-sol",
+    },
+    thinkingLevel: (config.defaultThinkingLevel ?? "medium") as ModelThinkingLevel,
+  };
+}
+
 export function entryMessages(entries: readonly EntryRecord[]): UiMessage[] {
   return entries.flatMap((entry) => {
     if (entry.model?.length)
@@ -209,14 +219,7 @@ export class Runtime {
     );
     const cwd = workspaces.find((workspace) => workspace.isAssistant)?.path ?? config.selfPath;
     const main = await harness.root(context, {
-      agent: {
-        model: {
-          provider: config.defaultProvider ?? "openai-codex",
-          modelId: config.defaultModel ?? "gpt-6.1-sol",
-        },
-        thinkingLevel: (config.defaultThinkingLevel ?? "medium") as ModelThinkingLevel,
-        cwd,
-      },
+      agent: { ...defaultAgentModel(config), cwd },
     });
     resources.bindMain(main.id);
     // Main uses the installed extensions' tools. Older MCP discovery persisted a
@@ -225,17 +228,7 @@ export class Runtime {
     await enableCodemodeAdapters(harness, context);
     await enableWorkerMemory(harness, context);
     if (!(await main.agent(context)).model) {
-      await main.configure(
-        {
-          model: {
-            provider: config.defaultProvider ?? "openai-codex",
-            modelId: config.defaultModel ?? "gpt-6.1-sol",
-          },
-          thinkingLevel: (config.defaultThinkingLevel ?? "medium") as ModelThinkingLevel,
-          cwd,
-        },
-        context,
-      );
+      await main.configure({ ...defaultAgentModel(config), cwd }, context);
     }
     tools.bindHarness(harness);
     tools.registerTools([
@@ -334,14 +327,9 @@ export class Runtime {
       : after !== undefined
         ? await this.historyIndex.nextBoundary(conversation.id, after, PAGE_SIZE)
         : { end: (await this.historyIndex.latestEntry(conversation.id)) ?? 0, more: false };
+    const historyEnd = boundary ? (boundary.end ?? Number(after!.split(":")[0])) : undefined;
     const history = includeHistory
-      ? await this.history(
-          conversation.id,
-          undefined,
-          PAGE_SIZE,
-          after,
-          boundary?.end ?? (after === undefined ? undefined : Number(after.split(":")[0])),
-        )
+      ? await this.history(conversation.id, undefined, PAGE_SIZE, after, historyEnd)
       : undefined;
     const activeTools = await Promise.all(
       (live?.tools ?? [])
@@ -452,9 +440,7 @@ export class Runtime {
       totalMessageCount,
       hasMoreMessages: totalMessageCount > all.length,
       historyAfter: after,
-      historyCursor: includeHistory
-        ? String(boundary?.end ?? Number(after!.split(":")[0]))
-        : undefined,
+      historyCursor: includeHistory ? String(historyEnd) : undefined,
       hasMoreRecentMessages: boundary?.more ?? false,
       messagesDetailLevel: "full",
       messages: all,
@@ -504,13 +490,8 @@ export class Runtime {
   }
 
   async useDefaultModel(): Promise<void> {
-    const model = {
-      provider: this.config.defaultProvider ?? "openai-codex",
-      modelId: this.config.defaultModel ?? "gpt-6.1-sol",
-    };
-    const thinkingLevel = (this.config.defaultThinkingLevel ?? "medium") as ModelThinkingLevel;
     await this.main.commit(async (tx) => {
-      await configure(tx, this.main.id, { model, thinkingLevel });
+      await configure(tx, this.main.id, defaultAgentModel(this.config));
     }, context);
   }
 

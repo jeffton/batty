@@ -1,54 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import type { Runtime } from "../runtime";
-import type { CronJob, CronJobInput } from "../orchestration";
+import { cronCommand, type CronRequest } from "../cron-command";
 
-type CronRequest = Partial<CronJobInput> & {
-  action: string;
-  jobId?: string;
-  runId?: string;
-  limit?: number;
-  eventId?: string;
-  text?: string;
-};
-
-export async function cronCommand(orchestration: Runtime["orchestration"], input: CronRequest) {
-  switch (input.action) {
-    case "list":
-      return orchestration.listJobSummaries(input.workspaceId);
-    case "get":
-      return orchestration.getJob(input.jobId!);
-    case "import":
-      return orchestration.importJob(input as unknown as CronJob);
-    case "add":
-      return orchestration.addJob(input as CronJobInput);
-    case "update":
-      return orchestration.updateJob(input.jobId!, input);
-    case "remove":
-      await orchestration.removeJob(input.jobId!);
-      return { ok: true };
-    case "list-running":
-      return orchestration.listRunningCron(input.jobId);
-    case "list-run-logs":
-      return orchestration.listRunLogs(input.jobId, input.limit, input.workspaceId);
-    case "stop-running": {
-      if (input.runId) await orchestration.stopRunning(input.runId);
-      else {
-        for (const run of await orchestration.listRunningCron(input.jobId))
-          await orchestration.stopRunning(run.id);
-      }
-      return { ok: true };
-    }
-    default:
-      throw new Error(`Unknown cron action: ${input.action}`);
-  }
-}
+type CronRouteRequest = CronRequest & { eventId?: string; text?: string };
 
 export function registerCronRoutes(
   app: FastifyInstance,
   orchestration: Runtime["orchestration"],
   notify?: (id: string, text: string) => Promise<{ published: boolean }>,
 ) {
-  app.post<{ Body: CronRequest }>("/api/cron", (request, reply) => {
+  app.post<{ Body: CronRouteRequest }>("/api/cron", (request, reply) => {
     if (request.body.action !== "notify" || !notify)
       return cronCommand(orchestration, request.body);
     if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(request.ip))

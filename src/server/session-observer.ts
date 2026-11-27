@@ -29,7 +29,12 @@ export function observeSession(
   let orchestrationDirty = notifyOrchestration;
   let cronDirty = notifyOrchestration;
   let scheduled: ReturnType<typeof setTimeout> | undefined;
-  const write = emit;
+  const readState = async (includeHistory: boolean) =>
+    images.state(
+      await (projection
+        ? projection.state(includeHistory, after)
+        : runtime.state(String(conversationId), view, includeHistory, after)),
+    );
   async function flush() {
     if (flushing || closed) return;
     flushing = true;
@@ -42,28 +47,20 @@ export function observeSession(
           const cron = cronDirty;
           orchestrationDirty = false;
           cronDirty = false;
-          await write({ type: "orchestration-changed", cron });
+          await emit({ type: "orchestration-changed", cron });
         }
-        let state = await images.state(
-          await (projection
-            ? projection.state(includeHistory, after)
-            : runtime.state(String(conversationId), view, includeHistory, after)),
-        );
+        let state = await readState(includeHistory);
         if (includeHistory) {
           for (;;) {
             after = state.historyCursor ?? after;
-            await write({
+            await emit({
               type: "reset",
               state,
               streamId: runtime.streamId,
               revision: state.revision,
             });
             if (closed || !state.hasMoreRecentMessages) break;
-            state = await images.state(
-              await (projection
-                ? projection.state(true, after)
-                : runtime.state(String(conversationId), view, true, after)),
-            );
+            state = await readState(true);
           }
         } else {
           const {
@@ -77,19 +74,19 @@ export function observeSession(
             activeTools,
             ...metadata
           } = state;
-          await write({
+          await emit({
             type: "state",
             state: metadata,
             streamId: runtime.streamId,
             revision: state.revision,
           });
-          await write({
+          await emit({
             type: "assistant",
             assistant: activeAssistant,
             streamId: runtime.streamId,
             revision: runtime.nextRevision(),
           });
-          await write({
+          await emit({
             type: "tools",
             tools: activeTools,
             streamId: runtime.streamId,
@@ -100,7 +97,7 @@ export function observeSession(
     } catch (error) {
       if (closed) return;
       onError(error);
-      await write({ type: "error", message: String(error) });
+      await emit({ type: "error", message: String(error) });
     } finally {
       flushing = false;
     }

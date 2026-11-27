@@ -1,6 +1,6 @@
 import { type TaskId, type Tx } from "@earendil-works/pi-durable";
 import { isOneShot } from "./cron-schedule.js";
-import { ArchivedWorker } from "./orchestration-history.js";
+import { ArchivedRun, ArchivedWorker } from "./orchestration-history.js";
 import { OrchestrationDoc, type CronJob, type CronRun } from "./orchestration-state.js";
 
 export function removeCompletedOneShot(jobs: Record<string, CronJob>, run: CronRun) {
@@ -22,6 +22,11 @@ export function removeCompletedOneShot(jobs: Record<string, CronJob>, run: CronR
     delete jobs[job.id];
   }
 }
+export async function archiveCronRun(tx: Tx, runs: Record<string, CronRun>, run: CronRun) {
+  Object.assign(await tx.doc(ArchivedRun, run.id, run), run);
+  delete runs[run.id];
+}
+
 export async function archiveWorker(tx: Tx, workerId: string, taskId: TaskId<string>) {
   const doc = await tx.doc(OrchestrationDoc);
   const worker = doc.workers[workerId];

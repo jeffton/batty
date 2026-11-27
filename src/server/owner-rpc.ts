@@ -34,7 +34,7 @@ import { SiteRecents } from "./site-recents";
 import { executeSiteFunction } from "./site-functions";
 import type { BrowserErrorReport } from "../shared/browser-errors";
 import type { CronJob, CronRun } from "./orchestration";
-import { cronCommand } from "./routes/cron";
+import { cronCommand } from "./cron-command";
 import { repairMemory } from "./memory-api";
 import type { Schedule } from "./orchestration-state";
 import { workspaceGit, workspaceFiles, workspaceSearch } from "./routes/workspace-files";

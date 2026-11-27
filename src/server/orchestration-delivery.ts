@@ -1,5 +1,9 @@
 import { encodeWorkerNotice } from "./worker-files.js";
-import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
+import {
+  archiveCronRun,
+  archiveWorker,
+  removeCompletedOneShot,
+} from "./orchestration-lifecycle.js";
 import type { Context } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord/json";
 
@@ -33,7 +37,7 @@ import {
   type PresentedAssistant,
 } from "./message-presentation.js";
 
-import { ArchivedRun, DeliveryRecord } from "./orchestration-history";
+import { DeliveryRecord } from "./orchestration-history";
 
 import {
   OrchestrationDoc,
@@ -472,8 +476,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
             run.finishedAt = runtime.now();
             run.output = text;
             removeCompletedOneShot(doc.jobs, run);
-            Object.assign(await tx.doc(ArchivedRun, run.id, run), run);
-            delete doc.runs[run.id];
+            await archiveCronRun(tx, doc.runs, run);
           }
           const metadata = await tx.doc(WorkerDoc, task.input.childId);
           metadata.latestResultAssignment = task.id;
@@ -528,8 +531,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
           const run = doc.runs[task.input.runId]!;
           run.status = "aborted";
           run.finishedAt = runtime.now();
-          Object.assign(await tx.doc(ArchivedRun, run.id, run), run);
-          delete doc.runs[run.id];
+          await archiveCronRun(tx, doc.runs, run);
         }
         const metadata = await tx.doc(WorkerDoc, task.input.childId);
         if (metadata.completion?.owner === task.id) delete metadata.completion;

@@ -26,7 +26,7 @@ function setup() {
   const refreshAuth = vi.spyOn(store, "refreshProviderAuthStatus").mockResolvedValue();
   const loadAgents = vi.spyOn(store, "getBattyAgentsFile").mockResolvedValue("Agent instructions");
   const wrapper = mount(SettingsPopover, {
-    props: { popoverId: "settings-test", anchorName: "--settings-test" },
+    props: { popoverId: "settings-test" },
     global: {
       stubs: {
         FullPopover: {

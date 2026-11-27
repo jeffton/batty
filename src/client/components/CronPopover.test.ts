@@ -67,7 +67,7 @@ describe("cron popover", () => {
       id === "second" ? [run, { ...run, runId: "no-session", sessionId: undefined }] : [],
     );
     const wrapper = mount(CronPopover, {
-      props: { popoverId: "cron-test", anchorName: "--cron" },
+      props: { popoverId: "cron-test" },
       global: {
         stubs: {
           FullPopover: {

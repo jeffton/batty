@@ -11,11 +11,7 @@ import { GitBranch } from "@lucide/vue";
 import { useAppStore } from "@/client/stores/app";
 import type { SessionResourcesResponse } from "@/shared/types";
 
-const props = defineProps<{
-  popoverId: string;
-  anchorName: string;
-  workspaceId?: string;
-}>();
+const props = defineProps<{ popoverId: string }>();
 
 const store = useAppStore();
 const tabs = ["Workspaces", "Skills", "MCPs", "Tools"] as const;
@@ -90,7 +86,6 @@ onBeforeUnmount(() => {
 <template>
   <FullPopover
     :popover-id="props.popoverId"
-    :anchor-name="props.anchorName"
     title="Workspaces and tools"
     close-label="Close workspaces and tools"
     @toggle="handleToggle"

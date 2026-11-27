@@ -9,7 +9,7 @@ import { listWorkspaceCronJobs, listWorkspaceCronRunLogs } from "@/client/lib/ap
 import { useAppStore } from "@/client/stores/app";
 import type { CronJob, CronRunLog } from "@/shared/types";
 
-const props = defineProps<{ popoverId: string; anchorName: string }>();
+const props = defineProps<{ popoverId: string }>();
 const store = useAppStore();
 const tabs = ["cron", "logs"] as const;
 type Tab = (typeof tabs)[number];
@@ -27,8 +27,8 @@ function tabId(tab: Tab) {
 function panelId(tab: Tab) {
   return `${props.popoverId}-${tab}-panel`;
 }
-function sessionPopoverId(kind: "worker" | "cron", id: string) {
-  return `${props.popoverId}-${kind}-${id}`;
+function sessionPopoverId(runId: string) {
+  return `${props.popoverId}-cron-${runId}`;
 }
 function workspaceLabel(id: string) {
   return store.workspaces.find((workspace) => workspace.id === id)?.label ?? id;
@@ -90,7 +90,6 @@ onBeforeUnmount(() => {
   <FullPopover
     class="cron-popover"
     :popover-id="props.popoverId"
-    :anchor-name="props.anchorName"
     title="Cron"
     subtitle="Cron jobs and logs across all workspaces"
     close-label="Close cron popover"
@@ -159,7 +158,7 @@ onBeforeUnmount(() => {
               :is="run.sessionId ? 'button' : 'article'"
               class="cron-popover__run"
               :type="run.sessionId ? 'button' : undefined"
-              :popovertarget="run.sessionId ? sessionPopoverId('cron', run.runId) : undefined"
+              :popovertarget="run.sessionId ? sessionPopoverId(run.runId) : undefined"
               :aria-label="run.sessionId ? `Open cron run session: ${run.title}` : undefined"
             >
               <span class="cron-popover__run-content">
@@ -186,7 +185,7 @@ onBeforeUnmount(() => {
             </component>
             <SubagentSessionPopover
               v-if="run.sessionId"
-              :popover-id="sessionPopoverId('cron', run.runId)"
+              :popover-id="sessionPopoverId(run.runId)"
               :session-id="run.sessionId"
               :cron-run="run"
               header-title="Cron run"

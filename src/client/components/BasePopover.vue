@@ -3,24 +3,15 @@ import { onBeforeUnmount, ref } from "vue";
 
 defineOptions({ inheritAttrs: false });
 
-const props = withDefaults(
-  defineProps<{
-    as?: "div" | "form";
-    mode?: "auto" | "manual";
-    anchorUp?: boolean;
-    anchorDown?: boolean;
-    floating?: boolean;
-    alignViewportRight?: boolean;
-    alignNarrowViewportLeft?: boolean;
-    alignAnchorLeft?: boolean;
-    boundaryId?: string;
-    dimBackdrop?: boolean;
-  }>(),
-  {
-    as: "div",
-    mode: "auto",
-  },
-);
+const props = defineProps<{
+  anchorUp?: boolean;
+  anchorDown?: boolean;
+  floating?: boolean;
+  alignViewportRight?: boolean;
+  alignNarrowViewportLeft?: boolean;
+  alignAnchorLeft?: boolean;
+  boundaryId?: string;
+}>();
 
 const emit = defineEmits<{
   toggle: [event: Event];
@@ -28,15 +19,15 @@ const emit = defineEmits<{
 
 const element = ref<HTMLElement | null>(null);
 const anchorStyle = ref<Record<string, string>>({});
-let observer: ResizeObserver | undefined;
-let layoutObserver: MutationObserver | undefined;
-let frame: number | undefined;
+let stopPositioning: (() => void) | undefined;
+
+function findAnchor(): HTMLElement {
+  return document.querySelector<HTMLElement>(`[popovertarget="${CSS.escape(element.value!.id)}"]`)!;
+}
 
 function positionAtAnchor(): void {
   const popover = element.value!;
-  const anchor = document.querySelector<HTMLElement>(
-    `[popovertarget="${CSS.escape(popover.id)}"]`,
-  )!;
+  const anchor = findAnchor();
   const rect = anchor.getBoundingClientRect();
   const viewport = window.visualViewport;
   const viewportLeft = viewport?.offsetLeft ?? 0;
@@ -78,81 +69,77 @@ function positionAtAnchor(): void {
   };
 }
 
-function stopPositioning(): void {
-  observer?.disconnect();
-  layoutObserver?.disconnect();
-  window.removeEventListener("resize", positionAtAnchor);
-  window.removeEventListener("scroll", positionAtAnchor, true);
-  window.visualViewport?.removeEventListener("resize", positionAtAnchor);
-  window.visualViewport?.removeEventListener("scroll", positionAtAnchor);
-  if (frame !== undefined) cancelAnimationFrame(frame);
+function handleBeforeToggle(event: Event): void {
+  stopPositioning?.();
+  stopPositioning = undefined;
+  if ((!props.anchorUp && !props.anchorDown) || (event as ToggleEvent).newState !== "open") return;
+
+  stopPositioning = startPositioning();
 }
 
-function handleBeforeToggle(event: Event): void {
-  if (!props.anchorUp && !props.anchorDown) return;
-  stopPositioning();
-  if ((event as ToggleEvent).newState !== "open") return;
-  frame = requestAnimationFrame(() => {
+function startPositioning(): () => void {
+  const controller = new AbortController();
+  const { signal } = controller;
+  const frame = requestAnimationFrame(() => {
     positionAtAnchor();
-    observer = new ResizeObserver(positionAtAnchor);
-    observer.observe(element.value!);
-    const anchor = document.querySelector<HTMLElement>(
-      `[popovertarget="${CSS.escape(element.value!.id)}"]`,
-    )!;
-    observer.observe(anchor);
+    const anchor = findAnchor();
     const container = anchor.parentElement!.parentElement!;
+    const observer = new ResizeObserver(positionAtAnchor);
+    observer.observe(element.value!);
+    observer.observe(anchor);
     observer.observe(container);
     if (props.boundaryId) observer.observe(document.getElementById(props.boundaryId)!);
-    layoutObserver = new MutationObserver(positionAtAnchor);
+    const layoutObserver = new MutationObserver(positionAtAnchor);
     layoutObserver.observe(container, {
       subtree: true,
       childList: true,
       attributes: true,
       characterData: true,
     });
-    window.addEventListener("resize", positionAtAnchor);
-    window.addEventListener("scroll", positionAtAnchor, true);
-    window.visualViewport?.addEventListener("resize", positionAtAnchor);
-    window.visualViewport?.addEventListener("scroll", positionAtAnchor);
+    signal.addEventListener(
+      "abort",
+      () => {
+        observer.disconnect();
+        layoutObserver.disconnect();
+      },
+      { once: true },
+    );
+    window.addEventListener("resize", positionAtAnchor, { signal });
+    window.addEventListener("scroll", positionAtAnchor, { signal, capture: true });
+    window.visualViewport?.addEventListener("resize", positionAtAnchor, { signal });
+    window.visualViewport?.addEventListener("scroll", positionAtAnchor, { signal });
   });
+  return () => {
+    cancelAnimationFrame(frame);
+    controller.abort();
+  };
 }
 
-onBeforeUnmount(stopPositioning);
-
-function showPopover(): void {
-  element.value?.showPopover();
-}
+onBeforeUnmount(() => stopPositioning?.());
 
 function hidePopover(): void {
   element.value?.hidePopover();
 }
 
-function togglePopover(force?: boolean): void {
-  element.value?.togglePopover(force);
-}
-
-defineExpose({ element, showPopover, hidePopover, togglePopover });
+defineExpose({ element, hidePopover });
 </script>
 
 <template>
   <!-- Teleport isolates ancestor styles. Callers must use :global for their
        unique root class: Vue does not forward caller scope IDs through Teleport. -->
   <Teleport to="body">
-    <component
-      :is="props.as"
+    <div
       ref="element"
-      :class="[
-        'base-popover',
-        { 'base-popover--dimmed': props.dimBackdrop, 'base-popover--floating': props.floating },
-      ]"
-      :popover="props.mode"
+      class="base-popover"
+      :class="{ 'base-popover--floating': props.floating }"
+      popover="auto"
       v-bind="$attrs"
       :style="anchorStyle"
       @beforetoggle="handleBeforeToggle"
       @toggle="emit('toggle', $event)"
     >
       <slot />
-    </component>
+    </div>
   </Teleport>
 </template>
 
@@ -171,9 +158,5 @@ defineExpose({ element, showPopover, hidePopover, togglePopover });
 
 .base-popover--floating::backdrop {
   background: transparent;
-}
-
-.base-popover--dimmed::backdrop {
-  background: var(--color-backdrop);
 }
 </style>

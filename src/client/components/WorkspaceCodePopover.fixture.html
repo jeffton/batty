@@ -39,7 +39,7 @@
           isPinned: false,
         },
       ];
-      createApp({ render: () => h(ToolsPopover, { popoverId: "tools", anchorName: "--tools" }) })
+      createApp({ render: () => h(ToolsPopover, { popoverId: "tools" }) })
         .use(pinia)
         .mount("#app");
       document.getElementById("tools").showPopover();

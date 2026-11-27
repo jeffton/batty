@@ -33,7 +33,7 @@ function setup() {
   const save = vi.spyOn(store, "setAssistantWorkspace").mockResolvedValue();
   const wrapper = mount(SettingsPopover, {
     attachTo: document.body,
-    props: { popoverId: "settings-test", anchorName: "--settings-test" },
+    props: { popoverId: "settings-test" },
     global: {
       stubs: {
         FullPopover: { template: '<div><slot name="header-content" /><slot /></div>' },

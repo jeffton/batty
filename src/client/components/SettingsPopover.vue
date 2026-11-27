@@ -10,10 +10,7 @@ import EnvironmentSettings from "./settings/EnvironmentSettings.vue";
 import RemoteSettings from "./settings/RemoteSettings.vue";
 import "./settings/settings.css";
 
-const props = defineProps<{
-  popoverId: string;
-  anchorName: string;
-}>();
+const props = defineProps<{ popoverId: string }>();
 
 const emit = defineEmits<{ logout: [] }>();
 const tabs = ["Assistant", "Appearance", "Auth", "Remote"] as const;
@@ -43,7 +40,6 @@ function handlePopoverToggle(event: Event): void {
   <FullPopover
     class="settings-popover"
     :popover-id="props.popoverId"
-    :anchor-name="props.anchorName"
     title="Settings"
     close-label="Close settings"
     @toggle="handlePopoverToggle"

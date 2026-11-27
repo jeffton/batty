@@ -14,12 +14,10 @@ const props = withDefaults(
     popoverId: string;
     title: string;
     subtitle?: string;
-    anchorName?: string;
     closeLabel?: string;
   }>(),
   {
     subtitle: undefined,
-    anchorName: undefined,
     closeLabel: "Close popover",
   },
 );
@@ -52,10 +50,7 @@ onBeforeUnmount(removeFromStack);
     :id="props.popoverId"
     ref="popoverElement"
     class="full-popover"
-    :style="{
-      'position-anchor': props.anchorName,
-      '--full-popover-stack-offset': stackOffset,
-    }"
+    :style="{ '--full-popover-stack-offset': stackOffset }"
     @toggle="onToggle"
   >
     <header class="full-popover__header">

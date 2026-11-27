@@ -79,7 +79,7 @@
                 h("main", { style: "flex:1" }, "Conversation"),
                 h(MessageComposer, { streaming: false, subagents: [] }),
               ])
-            : h(popover, { popoverId: view, anchorName: "--settings" }),
+            : h(popover, { popoverId: view }),
       })
         .use(pinia)
         .mount("#app");

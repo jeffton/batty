@@ -29,7 +29,7 @@ function setup() {
   ];
   const wrapper = mount(ToolsPopover, {
     attachTo: document.body,
-    props: { popoverId: "tools-test", anchorName: "--tools-test" },
+    props: { popoverId: "tools-test" },
     global: {
       stubs: {
         FullPopover: {

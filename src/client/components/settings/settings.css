@@ -56,10 +56,6 @@
   font-weight: 400;
 }
 
-.settings-popover .settings-popover__select {
-  min-height: 44px;
-}
-
 .settings-popover .settings-popover__input {
   font-family: var(--font-family-mono);
 }

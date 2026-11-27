@@ -107,13 +107,9 @@ async function logout() {
         :connection-state="store.connectionState"
       />
     </div>
-    <SettingsPopover
-      popover-id="settings-popover"
-      anchor-name="--settings-anchor"
-      @logout="logout"
-    />
-    <ToolsPopover popover-id="tools-popover" anchor-name="--tools-anchor" />
-    <CronPopover popover-id="workers-popover" anchor-name="--workers-anchor" />
+    <SettingsPopover popover-id="settings-popover" @logout="logout" />
+    <ToolsPopover popover-id="tools-popover" />
+    <CronPopover popover-id="workers-popover" />
     <SiteSwitcherPopover popover-id="site-switcher" />
   </header>
 </template>

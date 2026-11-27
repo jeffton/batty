@@ -58,7 +58,7 @@ test.each(["/", "/batty", "/nested/app"])(
         const url = `${prefix}/sites/${site.id}/`;
         expect(wrapper.find("iframe").exists()).toBe(false);
         const popover = wrapper.getComponent({ name: "FullPopover" });
-        expect(popover.attributes("subtitle")).toBe(new URL(url, window.location.href).href);
+        expect(popover.attributes("subtitle")).toBeUndefined();
         popover.vm.$emit("toggle", { newState: "open" });
         await wrapper.vm.$nextTick();
         expect(wrapper.get("iframe").attributes("src")).toBe(`${url}?batty_preview=1`);

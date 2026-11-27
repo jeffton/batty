@@ -70,7 +70,6 @@ watch(frame, (element, _previous, onCleanup) => {
   <FullPopover
     :popover-id="props.popoverId"
     :title="props.site?.name ?? 'Sites'"
-    :subtitle="absoluteUrl"
     :close-label="props.label ? 'Close sites' : 'Close site'"
     role="dialog"
     :aria-label="props.label ?? props.site?.name"

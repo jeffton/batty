@@ -13,7 +13,7 @@ import { fixtureOperation } from "../test/socket-fixture";
 const fixture = "src/client/components/SiteSwitcher.fixture.html";
 const baseUrl = "/nested/app";
 const names = [
-  "Weather and lake conditions",
+  "Weather and lake conditions including the full forecast for the coming week",
   "Garmin training overview",
   "Upcoming events in Copenhagen",
   "Groundwater and well readings",
@@ -152,7 +152,7 @@ test("opens the newest site with no visit history, then uses the most recent vis
 }, 30_000);
 
 test.each([
-  { name: "desktop", width: 1280, height: 840, mobile: false },
+  { name: "narrow desktop", width: 540, height: 840, mobile: false },
   { name: "320px touch", width: 320, height: 660, mobile: true },
 ])(
   "selects sites from a compact header menu, keeps the preview open, and preserves Public on $name",
@@ -209,6 +209,8 @@ test.each([
       }
       await activate(launcher);
       await frame.getByRole("heading", { name: names[0] }).waitFor();
+      await switcher.getByText(names[0]!, { exact: true }).waitFor();
+      expect(await switcher.locator(".full-popover__subtitle").count()).toBe(0);
       const sheet = (await switcher.boundingBox())!;
       expect(sheet.x).toBe(0);
       expect(sheet.width).toBe(page.viewportSize()!.width);
@@ -226,6 +228,23 @@ test.each([
       expect(await first.evaluate((element) => element.matches(":focus"))).toBe(!mobile);
       expect(await first.evaluate((element) => element.matches(":focus-visible"))).toBe(!mobile);
       expect(await first.getAttribute("aria-current")).toBe("page");
+      const longName = choices.getByRole("button", { name: names.at(-1), exact: true });
+      for (const button of [first, longName]) {
+        expect(
+          await button.locator("strong").evaluate((element) => {
+            const style = getComputedStyle(element);
+            return [
+              style.whiteSpace,
+              style.textOverflow,
+              element.scrollWidth > element.clientWidth,
+            ];
+          }),
+        ).toEqual(["nowrap", "ellipsis", true]);
+      }
+      expect(await first.locator(".chooser-popover__current svg").isVisible()).toBe(true);
+      expect((await first.locator("strong").boundingBox())?.x).toBe(
+        (await longName.locator("strong").boundingBox())?.x,
+      );
       expect(
         (await choices.getByRole("button").allTextContents()).map((name) => name.trim()),
       ).toEqual(allSites.map((site) => site.name));

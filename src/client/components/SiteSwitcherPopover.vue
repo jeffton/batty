@@ -178,10 +178,14 @@ onBeforeUnmount(() => {
   list-style: none;
 }
 
-.site-chooser__list .chooser-popover__label strong {
-  white-space: normal;
-  overflow-wrap: anywhere;
+.site-chooser__list .chooser-popover__current {
+  min-width: 0;
 }
+
+.site-chooser__list .chooser-popover__current svg {
+  max-width: 100%;
+}
+
 .site-switcher__status {
   display: flex;
   justify-content: center;

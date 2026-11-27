@@ -299,7 +299,7 @@ export function normalizeMessage(
     const notice = decodeRuntimeNotice(message.content);
     if (notice) {
       const direct = notice.data?.directDelivery as { text: string } | undefined;
-      if (notice.kind === "cron" && direct) {
+      if ((notice.kind === "cron" || notice.kind === "system") && direct) {
         const presentation = notice.data?.runtimePresentation as MessagePresentation | undefined;
         return {
           id: messageId("assistant", message.timestamp, index),
@@ -307,7 +307,9 @@ export function normalizeMessage(
           timestamp: message.timestamp,
           turnPhase: "final",
           stopReason: "stop",
-          directDelivery: notice.data!.cron as { sessionId: string; runId: string },
+          ...(notice.kind === "cron"
+            ? { directDelivery: notice.data!.cron as { sessionId: string; runId: string } }
+            : {}),
           blocks: [{ type: "text", text: direct.text }],
           sentFiles: presentation?.sentFiles,
           sites: presentation?.sites?.map(decodeSiteAttachmentDescriptor),

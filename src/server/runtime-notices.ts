@@ -5,7 +5,7 @@ import type { ContextView } from "@earendil-works/pi-durable";
 export const BATTY_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice";
 const NOTICE_OPEN = "<batty-runtime-notice>";
 const NOTICE_CLOSE = "</batty-runtime-notice>";
-export type RuntimeNoticeKind = "cron" | "subagent";
+export type RuntimeNoticeKind = "cron" | "subagent" | "system";
 export interface RuntimeNotice {
   kind: RuntimeNoticeKind;
   text: string;
@@ -28,7 +28,11 @@ export function decodeRuntimeNotice(content: unknown): RuntimeNotice | undefined
   if (!content.endsWith(NOTICE_CLOSE)) return undefined;
   try {
     const notice = JSON.parse(content.slice(NOTICE_OPEN.length, -NOTICE_CLOSE.length));
-    if (!notice || !["cron", "subagent"].includes(notice.kind) || typeof notice.text !== "string")
+    if (
+      !notice ||
+      !["cron", "subagent", "system"].includes(notice.kind) ||
+      typeof notice.text !== "string"
+    )
       return undefined;
     return notice;
   } catch {

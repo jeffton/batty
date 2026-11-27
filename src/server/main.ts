@@ -18,6 +18,7 @@ import { registerApiAuth } from "./routes/api-auth";
 import { appBasePath, renderAppShell } from "./app-shell";
 import { createBrowserErrorReporter } from "./browser-errors";
 import { registerCronRoutes } from "./routes/cron";
+import { publishSystemNotification } from "./system-notification";
 import { registerDraftRoutes } from "./routes/drafts";
 import { registerSiteRoutes } from "./routes/sites";
 import { sendArtifactText } from "./artifact-text";
@@ -97,7 +98,9 @@ const reportBrowserError = createBrowserErrorReporter(
   app,
   path.join(stateDirPath(config.battyDir), "browser-errors.json"),
 );
-registerCronRoutes(app, runtime.orchestration);
+registerCronRoutes(app, runtime.orchestration, (id, text) =>
+  publishSystemNotification(runtime.main, id, text),
+);
 const draftScope = draftOwnerScope(config.authSecret);
 await registerDraftRoutes(app, stateDirPath(config.battyDir), draftScope);
 registerSiteRoutes(routeContext);

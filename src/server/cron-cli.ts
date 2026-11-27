@@ -7,7 +7,7 @@ import { isRemoteCommand, runRemoteCli } from "./remote-cli";
 import { runMaintenanceCli } from "./maintenance-cli";
 
 export const help = `Usage: batty2 [--root /var/lib/batty2] cron ACTION [JOB_ID] [options]
-Actions: add, update, remove, list, get, import, list-running, list-run-logs, stop-running
+Actions: add, update, remove, list, get, import, list-running, list-run-logs, stop-running, notify
 Options:
   --workspace ID --title TEXT --prompt TEXT --model PROVIDER/MODEL --thinking LEVEL
   --in DURATION --at ISO_DATE --every DURATION --cron EXPRESSION
@@ -18,6 +18,7 @@ Options:
 list returns compact summaries across all workspaces; --workspace ID filters them.
 get JOB_ID returns full details including prompt.
 add requires --title, --prompt and a schedule.
+notify takes JSON { eventId, text } and publishes one system notification per eventId.
 Outputs JSON. Uses the running Batty2 service; does not start a scheduler.
 For remote instance provisioning: batty2 remote --help
 For planned downtime: batty2 maintenance --help

@@ -134,10 +134,10 @@ onUnmounted(() => {
 
 <template>
   <main class="repair" aria-labelledby="title">
-    <img class="illustration" :src="illustration" alt="" width="160" height="160" />
-    <h1 id="title">Under maintenance</h1>
-    <div class="status" role="status" aria-live="polite">
-      <p>{{ owner?.message ?? "Batty will be back here when maintenance is complete." }}</p>
+    <img class="illustration" :src="illustration" alt="" width="512" height="512" />
+    <h1 id="title">Batty is under maintenance</h1>
+    <div class="status" role="status">
+      <p v-if="owner">{{ owner.message }}</p>
       <div class="meter">
         <progress
           :value="owner?.progress ?? undefined"
@@ -163,11 +163,26 @@ onUnmounted(() => {
       <form @submit.prevent="ask">
         <label class="sr-only" for="question">Question</label>
         <input id="question" v-model="draft" placeholder="How is it going?" autocomplete="off" />
-        <button v-if="pending" type="button" @click="request?.abort()">Stop</button>
-        <button v-else type="submit" :disabled="!draft.trim()">Ask</button>
+        <button v-if="pending" class="chrome-button" type="button" @click="request?.abort()">
+          Stop
+        </button>
+        <button
+          v-else
+          class="chrome-button chrome-button--primary"
+          type="submit"
+          :disabled="!draft.trim()"
+        >
+          Ask
+        </button>
       </form>
     </section>
-    <button v-else-if="loaded" type="button" :disabled="signingIn" @click="signIn">
+    <button
+      v-else-if="loaded"
+      class="chrome-button chrome-button--primary"
+      type="button"
+      :disabled="signingIn"
+      @click="signIn"
+    >
       Sign in with a passkey
     </button>
     <p v-if="formError" class="error" role="alert">{{ formError }}</p>
@@ -175,43 +190,21 @@ onUnmounted(() => {
 </template>
 
 <style>
-:root {
-  font-family: "Source Sans 3", system-ui, sans-serif;
-  color-scheme: light dark;
-  --surface: #f7f7f5;
-  --panel: #fff;
-  --ink: #242726;
-  --muted: #5d625e;
-  --line: #dadeda;
-  --accent: #795418;
-  --error: #a62c2c;
-  background: var(--surface);
-  color: var(--ink);
+html:has(#maintenance),
+body:has(#maintenance) {
+  height: auto;
+  overflow: visible;
+  background: var(--color-bg-app);
 }
+</style>
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface: #151817;
-    --panel: #202423;
-    --ink: #f0f1ed;
-    --muted: #bdc2bd;
-    --line: #3a413e;
-    --accent: #e8ba70;
-    --error: #ff9b99;
-  }
-}
-
-* {
-  box-sizing: border-box;
-}
-body {
-  margin: 0;
-}
+<style scoped>
 .repair {
   min-height: 100dvh;
   max-width: 38rem;
   margin: auto;
-  padding: max(1.75rem, env(safe-area-inset-top)) 1.25rem max(2rem, env(safe-area-inset-bottom));
+  padding: max(2rem, var(--safe-area-top)) max(1.5rem, var(--safe-area-right))
+    max(2rem, var(--safe-area-bottom)) max(1.5rem, var(--safe-area-left));
   display: flex;
   flex-direction: column;
   justify-content: safe center;
@@ -219,42 +212,43 @@ body {
   text-align: center;
 }
 .illustration {
-  display: block;
-  object-fit: contain;
+  width: 7.5rem;
+  height: 7.5rem;
+  margin-bottom: 1.25rem;
 }
 h1 {
-  margin: 0.15rem 0 0.4rem;
-  font-size: 2rem;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
 }
 .status {
-  width: min(100%, 28rem);
-  margin-bottom: 1.75rem;
+  width: min(100%, 20rem);
+  margin: 0.6rem 0 1.5rem;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
 }
 .status p {
-  margin: 0.35rem 0 0.7rem;
-  color: var(--muted);
-  overflow-wrap: anywhere;
+  margin: 0 0 0.4rem;
 }
 .meter {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
 progress {
   flex: 1;
-  height: 0.8rem;
-  accent-color: var(--accent);
+  min-width: 0;
+  height: 0.65rem;
+  accent-color: var(--color-accent);
 }
 .chat {
   width: 100%;
   text-align: start;
-  border: 1px solid var(--line);
-  border-radius: 1rem;
-  background: var(--panel);
-  padding: 0.9rem;
+  border-top: 1px solid var(--color-border-soft);
+  padding-top: 0.7rem;
 }
 .chat-title {
   display: flex;
@@ -270,8 +264,8 @@ progress {
 }
 .chat-title p,
 .quiet {
-  color: var(--muted);
-  font-size: 0.95rem;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
   margin: 0;
 }
 .transcript {
@@ -282,50 +276,50 @@ progress {
   gap: 0.65rem;
 }
 .transcript li {
-  padding: 0.55rem 0.75rem;
-  border-radius: 0.55rem;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 .transcript .user {
-  background: var(--surface);
+  justify-self: end;
+  max-width: 90%;
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--chrome-control-radius);
+  background: var(--color-user-bg);
+  color: var(--color-user-text);
 }
 .transcript strong {
   display: block;
+  font-weight: 600;
 }
 form {
   display: flex;
   gap: 0.45rem;
 }
-input,
-button {
-  font: inherit;
-  min-height: 2.75rem;
-  border: 1px solid var(--line);
-  border-radius: 0.55rem;
-  padding: 0.35rem 0.75rem;
-}
 input {
   flex: 1;
   min-width: 0;
-  background: var(--surface);
+  height: var(--button-size);
+  padding: 0 0.75rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--chrome-control-radius);
+  background: var(--color-bg-panel-strong);
   color: inherit;
+  font-size: 16px;
 }
-button {
-  background: var(--panel);
-  color: var(--ink);
-  cursor: pointer;
+input::placeholder {
+  color: var(--color-text-muted);
 }
-button:disabled {
-  opacity: 0.6;
-  cursor: default;
+input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 .quiet {
   margin-bottom: 0.5rem;
 }
-.error,
-.status .error {
-  color: var(--error);
+.repair .error {
+  color: var(--color-error);
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }
 .sr-only {
   position: absolute;

@@ -43,7 +43,12 @@ import { createCodemodeTasks } from "./codemode-tasks";
 import { cancelPersistentBashJobs } from "./durable-bash-cancel";
 import { createBashAbortWatcher } from "./tools-abort-watcher";
 
-export async function toolCwd(api: ToolExecutionApi, ctx: Context): Promise<string> {
+type BridgedTool = Pick<
+  ToolDefinition<any>,
+  "description" | "parameters" | "execute" | "promptGuidelines"
+>;
+
+async function toolCwd(api: ToolExecutionApi, ctx: Context): Promise<string> {
   const cwd = api.env?.cwd ?? (await api.agent(ctx)).cwd;
   if (!cwd) throw new Error("Tool requires a conversation working directory");
   return cwd;
@@ -73,15 +78,11 @@ export async function createTools(
 
   const bridge = (
     name: string,
-    factory: (
-      cwd: string,
-      api: ToolExecutionApi,
-    ) => Pick<ToolDefinition<any>, "name" | "description" | "parameters" | "execute">,
-    replay: "safe" | "unsafe" = "unsafe",
+    metadata: BridgedTool,
+    load: (cwd: string, api: ToolExecutionApi) => BridgedTool | Promise<BridgedTool>,
+    replay: "safe" | "unsafe",
   ) => {
-    const metadata = factory(process.cwd(), {} as ToolExecutionApi);
-    for (const guideline of (metadata as ToolDefinition<any>).promptGuidelines ?? [])
-      guidelines.add(guideline);
+    for (const guideline of metadata.promptGuidelines ?? []) guidelines.add(guideline);
     return defineTool({
       name,
       description: metadata.description,
@@ -89,7 +90,7 @@ export async function createTools(
       replay,
       execute: async (args, api, ctx) => {
         const cwd = await toolCwd(api, ctx);
-        const definition = factory(cwd, api);
+        const definition = await load(cwd, api);
         const context = {
           cwd,
           signal: ctx.abortSignal,
@@ -126,65 +127,67 @@ export async function createTools(
       },
     });
   };
+  const unscoped = (
+    name: string,
+    factory: (cwd: string, api?: ToolExecutionApi) => BridgedTool,
+    replay: "safe" | "unsafe" = "unsafe",
+  ) => bridge(name, factory(process.cwd()), factory, replay);
+
   const native = [
-    bridge("read", (cwd) => createBattyReadTool(cwd), "safe"),
-    bridge("write", (cwd) => createMutationTool(cwd, "write")),
-    bridge("edit", (cwd) => createMutationTool(cwd, "edit")),
+    unscoped("read", createBattyReadTool, "safe"),
+    unscoped("write", (cwd) => createMutationTool(cwd, "write")),
+    unscoped("edit", (cwd) => createMutationTool(cwd, "edit")),
     process.platform === "win32"
-      ? bridge("powershell", (cwd) => {
+      ? unscoped("powershell", (cwd) => {
           // The SDK also supports Windows PowerShell 5.1; Batty requires PowerShell 7.
           if (path.basename(getPowerShellConfig().shell).toLowerCase() !== "pwsh.exe")
             throw new Error("Batty requires PowerShell 7 (pwsh.exe) on PATH");
           return createPowerShellToolDefinition(cwd, { exposeSessionEnvironment: false });
         })
-      : bridge(
+      : unscoped(
           "bash",
           (cwd, api) =>
             createBashToolDefinition(cwd, {
               operations: persistentBashOperations(
                 jobsDir,
-                `${api.conversationId ?? "metadata"}-${api.taskId ?? "metadata"}-${api.callId ?? "metadata"}`,
+                `${api?.conversationId ?? "metadata"}-${api?.taskId ?? "metadata"}-${api?.callId ?? "metadata"}`,
               ),
               exposeSessionEnvironment: false,
             }),
           "safe",
         ),
-    bridge("find", (cwd) => createFindToolDefinition(cwd), "safe"),
-    bridge("grep", (cwd) => createGrepToolDefinition(cwd), "safe"),
+    unscoped("find", (cwd) => createFindToolDefinition(cwd), "safe"),
+    unscoped("grep", (cwd) => createGrepToolDefinition(cwd), "safe"),
   ];
   const scoped = (
     name: string,
-    factory: (
-      dependencies: any,
-    ) => Pick<ToolDefinition<any>, "name" | "description" | "parameters" | "execute">,
+    factory: (dependencies: Parameters<typeof createBrowserTool>[0]) => BridgedTool,
     replay: "safe" | "unsafe" = "unsafe",
   ) => {
-    const metadata = factory({
-      config,
-      browserService,
-      workspace: { id: "metadata", path: process.cwd() },
-    });
-    for (const guideline of (metadata as ToolDefinition<any>).promptGuidelines ?? [])
-      guidelines.add(guideline);
-    return defineTool({
+    const dependencies = { config, browserService };
+    return bridge(
       name,
-      description: metadata.description,
-      parameters: metadata.parameters,
-      replay,
-      execute: async (args, api, ctx) => {
-        const cwd = await toolCwd(api, ctx);
+      factory({
+        ...dependencies,
+        workspace: {
+          id: "metadata",
+          label: "metadata",
+          path: process.cwd(),
+          kind: "workspace",
+          isPinned: false,
+          isAssistant: false,
+        },
+      }),
+      async (cwd) => {
         const workspace = await workspaceForCwd(config, cwd);
-        return bridge(
-          name,
-          () => factory({ config, browserService, workspace: { ...workspace, path: cwd } }),
-          replay,
-        ).execute(args, api, ctx);
+        return factory({ ...dependencies, workspace: { ...workspace, path: cwd } });
       },
-    });
+      replay,
+    );
   };
   const local: ToolRegistration[] = [
     ...native,
-    bridge("web_search", () => createWebSearchTool(config), "safe"),
+    unscoped("web_search", () => createWebSearchTool(config), "safe"),
     scoped("browser", createBrowserTool),
     scoped("sites", createSitesTool),
     scoped("import_files", createImportFilesTool, "safe"),

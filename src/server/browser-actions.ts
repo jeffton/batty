@@ -296,35 +296,41 @@ export function framesResult(
   };
 }
 
+async function actionLocation(
+  session: BrowserSession,
+  action: BrowserAction,
+  page: Page,
+  frame: Frame,
+) {
+  const currentPageId = pageId(session, page);
+  const currentFrameId = frameId(session, frame);
+  const title = await page.title();
+  return { action, pageId: currentPageId, frameId: currentFrameId, url: page.url(), title };
+}
+
+function locationHeader(
+  { title, pageId, frameId, url }: Awaited<ReturnType<typeof actionLocation>>,
+  mainFrame: boolean,
+) {
+  return [
+    `Page: ${title || "(untitled)"}`,
+    `Page ID: ${pageId}`,
+    `Frame ID: ${frameId}${mainFrame ? " (main)" : ""}`,
+    `URL: ${url}`,
+  ];
+}
+
 export async function textResult(
   session: BrowserSession,
   input: BrowserActionInput,
   page: Page,
   frame: Frame,
-  output: ActionOutput,
+  { text, downloadPaths }: ActionOutput,
 ): Promise<BrowserActionResult> {
-  const currentPageId = pageId(session, page);
-  const currentFrameId = frameId(session, frame);
-  const title = await page.title();
-  const url = page.url();
-  const downloadPaths = output.downloadPaths;
+  const details = await actionLocation(session, input.action, page, frame);
   return {
-    text: [
-      `Page: ${title || "(untitled)"}`,
-      `Page ID: ${currentPageId}`,
-      `Frame ID: ${currentFrameId}${frame === page.mainFrame() ? " (main)" : ""}`,
-      `URL: ${url}`,
-      "",
-      output.text,
-    ].join("\n"),
-    details: {
-      action: input.action,
-      pageId: currentPageId,
-      frameId: currentFrameId,
-      url,
-      title,
-      downloadPaths,
-    },
+    text: [...locationHeader(details, frame === page.mainFrame()), "", text].join("\n"),
+    details: { ...details, downloadPaths },
     downloadPaths,
   };
 }
@@ -337,33 +343,18 @@ export async function snapshotResult(
   frame = page.mainFrame(),
   output: ActionOutput = {},
 ): Promise<BrowserActionResult> {
-  const currentPageId = pageId(session, page);
-  const currentFrameId = frameId(session, frame);
-  const title = await page.title();
-  const url = page.url();
+  const location = await actionLocation(session, input.action, page, frame);
   const pages = await pageDetails(session, session.agentPages.get(clientId) ?? "");
-  const header = [
-    `Page: ${title || "(untitled)"}`,
-    `Page ID: ${currentPageId}`,
-    `Frame ID: ${currentFrameId}${frame === page.mainFrame() ? " (main)" : ""}`,
-    `URL: ${url}`,
-    ...(pages.length > 1 ? [`Open pages: ${pages.map((entry) => entry.id).join(", ")}`] : []),
-    "",
-  ];
+  const details = { ...location, pages };
+  const header = locationHeader(location, frame === page.mainFrame());
+  if (pages.length > 1) header.push(`Open pages: ${pages.map((entry) => entry.id).join(", ")}`);
+  header.push("");
   if (output.image) {
     return {
       text: ["Screenshot captured.", `Saved to: ${output.screenshotPath}`, "", ...header].join(
         "\n",
       ),
-      details: {
-        action: input.action,
-        pageId: currentPageId,
-        frameId: currentFrameId,
-        url,
-        title,
-        pages,
-        screenshotPath: output.screenshotPath,
-      },
+      details: { ...details, screenshotPath: output.screenshotPath },
       image: { data: output.image.toString("base64"), mimeType: "image/png" },
     };
   }
@@ -371,13 +362,6 @@ export async function snapshotResult(
   const ariaSnapshot = await frame.locator("body").ariaSnapshot();
   return {
     text: [...header, ariaSnapshot].join("\n"),
-    details: {
-      action: input.action,
-      pageId: currentPageId,
-      frameId: currentFrameId,
-      url,
-      title,
-      pages,
-    },
+    details,
   };
 }

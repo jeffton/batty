@@ -130,17 +130,8 @@ function toDescriptor(
   };
 }
 
-async function readManifest(
-  rootDir: string,
-  workspaceId: string,
-  sessionId: string,
-  toolCallId: string,
-): Promise<StoredSentFileManifest> {
-  const manifestPath = path.join(
-    toolDirectory(rootDir, workspaceId, sessionId, toolCallId),
-    MANIFEST_FILE_NAME,
-  );
-  return JSON.parse(await fs.readFile(manifestPath, "utf8")) as StoredSentFileManifest;
+async function readManifest(dir: string): Promise<StoredSentFileManifest> {
+  return JSON.parse(await fs.readFile(path.join(dir, MANIFEST_FILE_NAME), "utf8"));
 }
 
 export async function* storedSentFiles(rootDir: string, baseUrl: string, fileId: string) {
@@ -153,12 +144,7 @@ export async function* storedSentFiles(rootDir: string, baseUrl: string, fileId:
       }
       for (const call of await storageDirectories(session)) {
         try {
-          const manifest = await readManifest(
-            rootDir,
-            path.basename(workspace),
-            path.basename(session),
-            path.basename(call),
-          );
+          const manifest = await readManifest(call);
           const { workspaceId, sessionId, toolCallId } = manifest;
           for (const file of manifest.files) {
             if (file.id !== fileId) continue;
@@ -204,15 +190,9 @@ export async function storeSentFiles(
     }));
   if (options.reuseExisting) {
     try {
-      const manifest = await readManifest(
-        options.rootDir,
-        options.workspaceId,
-        options.sessionId,
-        options.toolCallId,
-      );
-      return descriptors(manifest.files);
+      return descriptors((await readManifest(dir)).files);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!missingFile(error)) throw error;
     }
   }
   await fs.mkdir(dir, { recursive: true });
@@ -259,12 +239,13 @@ export async function storeSentFiles(
 }
 
 export async function resolveSentFile(options: ResolveSentFileOptions): Promise<ResolvedSentFile> {
-  const manifest = await readManifest(
+  const dir = toolDirectory(
     options.rootDir,
     options.workspaceId,
     options.sessionId,
     options.toolCallId,
   );
+  const manifest = await readManifest(dir);
   const file = manifest.files.find((candidate) => candidate.id === options.fileId);
   if (!file) {
     throw Object.assign(new Error(`Sent file not found: ${options.fileId}`), { statusCode: 404 });
@@ -278,9 +259,6 @@ export async function resolveSentFile(options: ResolveSentFileOptions): Promise<
       options.toolCallId,
       file,
     ),
-    storedPath: path.join(
-      toolDirectory(options.rootDir, options.workspaceId, options.sessionId, options.toolCallId),
-      file.storedName,
-    ),
+    storedPath: path.join(dir, file.storedName),
   };
 }

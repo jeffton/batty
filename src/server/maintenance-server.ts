@@ -1,10 +1,11 @@
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { resolveBattyDir } from "./config";
 import { createMaintenanceApp } from "./maintenance-app";
 import { mainLoopback } from "./maintenance-state";
 
 const root = resolveBattyDir();
-const selfPath = process.env.BATTY_SELF_PATH ?? process.cwd();
+const selfPath = await realpath(process.env.BATTY_SELF_PATH ?? process.cwd());
 const app = await createMaintenanceApp(
   root,
   path.join(selfPath, "dist", "client"),

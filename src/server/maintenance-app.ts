@@ -32,7 +32,12 @@ export async function createMaintenanceApp(
     "<head>",
     '<head><base href="/maintenance/">',
   );
-  const app = fastify({ trustProxy: ["127.0.0.1", "::1"], forceCloseConnections: true });
+  const app = fastify({
+    trustProxy: ["127.0.0.1", "::1"],
+    forceCloseConnections: true,
+    disableRequestLogging: true,
+    logger: { level: "warn" },
+  });
   await app.register(cookie);
 
   const prefix = "/api/maintenance";
@@ -117,7 +122,15 @@ export async function createMaintenanceApp(
         return { answer };
       } catch (error) {
         if (abort.signal.aborted) return;
-        request.log.warn({ name: (error as Error)?.name }, "Maintenance chat failed");
+        request.log.warn(
+          {
+            name: (error as Error)?.name,
+            code: (error as NodeJS.ErrnoException)?.code,
+            provider: state.model.provider,
+            model: state.model.modelId,
+          },
+          "Maintenance chat failed",
+        );
         return reply
           .code(502)
           .send({ error: "The main model could not answer during maintenance." });

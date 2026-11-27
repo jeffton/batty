@@ -59,6 +59,40 @@ health_matches_expected() {
   ' "$response" "$expected_build_id"
 }
 
+wait_for_maintenance_sidecar() {
+  local attempt response
+  for attempt in {1..15}; do
+    response=$(curl --fail --silent --max-time 2 http://127.0.0.1:3149/healthz || true)
+    [[ "$response" == '{"maintenance":true}' ]] && return 0
+    sleep 1
+  done
+  echo 'Batty maintenance sidecar did not become ready; retaining old releases.' >&2
+  return 1
+}
+
+finish_linux_release() (
+  local releases_dir=$1 active_release=$2 maintenance_dir=$3 lock_fd sidecar_state
+  if [[ -d "$maintenance_dir" ]]; then
+    local lock="$maintenance_dir/control.lock"
+    if [[ ! -e "$lock" ]]; then
+      (umask 077; runuser -u "$(stat -c '%U' "$maintenance_dir")" -- touch "$lock") || return
+    fi
+    exec {lock_fd}<"$lock" || return
+    flock -x "$lock_fd" || return
+    if [[ -e "$maintenance_dir/active.json" ]]; then
+      echo 'Maintenance is active; retaining its sidecar and release files.'
+      return
+    fi
+  fi
+  sidecar_state=$(systemctl show --property=ActiveState --value batty2-maintenance.service) || return
+  case $sidecar_state in
+    active|activating|reloading|failed)
+      systemctl restart batty2-maintenance.service && wait_for_maintenance_sidecar || return
+      ;;
+  esac
+  prune_releases "$releases_dir" "$active_release"
+)
+
 newest_release_paths() {
   local releases_dir=$1 release name timestamp
   for release in "$releases_dir"/*; do

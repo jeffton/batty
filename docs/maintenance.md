@@ -14,7 +14,7 @@ Include `deploy/nginx-maintenance.conf` inside Batty's HTTPS server block. Add t
 if (-f /var/lib/batty2/maintenance/active.json) { return 418; }
 ```
 
-Keep the primary Batty port private/loopback. The snippet expects Batty at the web origin's root and reserves `/maintenance/` and `/api/maintenance/`. It does not intercept a different installation's routes. Run `nginx -t` before reload. Enable and start `batty2-maintenance.service`. Verify `/api/maintenance/status` returns `{"active":false}` through the HTTPS origin and that regular Batty still works. Refresh the sidecar after future releases when maintenance is inactive.
+Keep the primary Batty port private/loopback. The snippet expects Batty at the web origin's root and reserves `/maintenance/` and `/api/maintenance/`. It does not intercept a different installation's routes. Run `nginx -t` before reload. Enable and start `batty2-maintenance.service`. Verify `/api/maintenance/status` returns `{"active":false}` through the HTTPS origin and that regular Batty still works. The Linux deploy script restarts the running sidecar before pruning old releases. If a deployment finishes while maintenance is active, it leaves the sidecar and its release files in place until the next ordinary deployment.
 
 ## Run a migration
 

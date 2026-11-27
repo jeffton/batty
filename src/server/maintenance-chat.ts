@@ -126,7 +126,10 @@ export function createMaintenanceChat(root: string, mainUrl: string, fixtureMode
       const models = await run.models;
       signal.throwIfAborted();
       const model = models.getModel(selection.provider, selection.modelId);
-      if (!model) throw new Error("The main model is not available");
+      if (!model)
+        throw Object.assign(new Error("The main model is not available"), {
+          code: "MAINTENANCE_MODEL_UNAVAILABLE",
+        });
       const agent = new Agent({
         streamFn: withModelStreamTimeout(models.streamSimple.bind(models)),
         initialState: {
@@ -166,12 +169,22 @@ export function createMaintenanceChat(root: string, mainUrl: string, fixtureMode
       try {
         await agent.prompt(messages.at(-1)!.text);
         signal.throwIfAborted();
-        if (agent.state.errorMessage) throw new Error("The model could not answer");
+        if (agent.state.errorMessage)
+          throw Object.assign(new Error("The model could not answer"), {
+            code: "MAINTENANCE_MODEL_FAILED",
+          });
         const answer = agent.state.messages.at(-1);
-        if (answer?.role !== "assistant") throw new Error("The model returned no response");
-        return answer.content
-          .flatMap((block) => (block.type === "text" ? [block.text] : []))
-          .join("");
+        const text =
+          answer?.role === "assistant"
+            ? answer.content
+                .flatMap((block) => (block.type === "text" ? [block.text] : []))
+                .join("")
+            : "";
+        if (!text.trim())
+          throw Object.assign(new Error("The model returned no response"), {
+            code: "MAINTENANCE_MODEL_EMPTY",
+          });
+        return text;
       } finally {
         signal.removeEventListener("abort", abort);
       }

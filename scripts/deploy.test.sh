@@ -124,4 +124,48 @@ PATH="$tmp/bin:$PATH" prune_releases "$releases" "$tmp/current"
 [[ ! -e "$releases/r3.3" ]]
 [[ ! -e "$releases/r4.4" ]]
 
+# A serving sidecar must move to the new release before old dependencies disappear.
+(
+  maintenance="$tmp/maintenance"
+  mkdir -p "$maintenance"
+  touch "$maintenance/control.lock"
+  systemctl() {
+    [[ ${*: -1} == batty2-maintenance.service ]] || exit 98
+    case $1 in
+      show) printf '%s\n' "$sidecar" ;;
+      restart) printf 'restart\n' >> "$tmp/finish-steps"; [[ $restart == success ]] ;;
+      *) exit 99 ;;
+    esac
+  }
+  curl() { printf 'probe\n' >> "$tmp/finish-steps"; printf '%s' "$health"; }
+  sleep() { :; }
+  prune_releases() { printf 'prune\n' >> "$tmp/finish-steps"; }
+  sidecar=active restart=success health='{"maintenance":true}'
+  touch "$maintenance/active.json"
+  finish_linux_release "$releases" "$tmp/current" "$maintenance"
+  [[ ! -e "$tmp/finish-steps" ]]
+  mv "$maintenance/active.json" "$tmp/previous-maintenance.json"
+  finish_linux_release "$releases" "$tmp/current" "$maintenance"
+  [[ $(<"$tmp/finish-steps") == $'restart\nprobe\nprune' ]]
+  : > "$tmp/finish-steps"
+  restart=failed
+  if finish_linux_release "$releases" "$tmp/current" "$maintenance"; then
+    echo 'Release finished despite a sidecar restart failure.' >&2
+    exit 1
+  fi
+  [[ $(<"$tmp/finish-steps") == restart ]]
+  : > "$tmp/finish-steps"
+  sidecar=failed restart=success health='{"ok":true}'
+  if finish_linux_release "$releases" "$tmp/current" "$maintenance"; then
+    echo 'Release finished despite an unhealthy sidecar.' >&2
+    exit 1
+  fi
+  [[ $(head -1 "$tmp/finish-steps") == restart ]]
+  [[ $(tail -1 "$tmp/finish-steps") == probe ]]
+  : > "$tmp/finish-steps"
+  sidecar=inactive
+  finish_linux_release "$releases" "$tmp/current" "$tmp/not-configured"
+  [[ $(<"$tmp/finish-steps") == prune ]]
+)
+
 printf 'deploy lifecycle tests passed\n'

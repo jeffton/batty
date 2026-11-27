@@ -24,7 +24,7 @@ for attempt in {1..300}; do
     if [[ -n "$previous_release" && ! -f "$previous_release/HEALTHY" && ! -f "$previous_release/CLIENT_ASSETS.txt" ]]; then
       touch "$previous_release/HEALTHY"
     fi
-    prune_releases "$releases_dir" /opt/batty2/current
+    finish_linux_release "$releases_dir" /opt/batty2/current /var/lib/batty2/maintenance
     exit 0
   fi
   sleep 1

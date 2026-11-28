@@ -115,6 +115,8 @@ test.each([false, true])(
       expect(calls).toEqual([calls[0], calls[0]]);
       expect(await page.locator("#parent:popover-open, #worker:popover-open").count()).toBe(2);
 
+      const transcriptReply = page.getByText("First line Second line", { exact: true });
+      expect(await transcriptReply.count()).toBe(0);
       publish!({
         type: "reset",
         streamId: session.streamId,
@@ -128,7 +130,8 @@ test.each([false, true])(
           ],
         },
       });
-      await page.getByText("First line Second line").waitFor();
+      await transcriptReply.waitFor();
+      expect(await transcriptReply.count()).toBe(1);
     } finally {
       rejected.resolve();
       await page.close();

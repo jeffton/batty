@@ -24,10 +24,10 @@ test("a rejected send keeps the draft and retries the same request without doubl
     await wrapper.trigger("submit");
     expect(send).toHaveBeenCalledExactlyOnceWith("Do the thing", expect.any(String));
 
-    attempt.reject(new Error("Connection lost"));
+    attempt.reject(new RpcError("BAD_INPUT", "Invalid RPC protocol frame"));
     await flushPromises();
     expect(input.element.value).toBe("  Do the thing  ");
-    expect(wrapper.get('[role="alert"]').text()).toBe("Connection lost");
+    expect(wrapper.get('[role="alert"]').text()).toBe("Invalid RPC protocol frame");
 
     await wrapper.trigger("submit");
     await flushPromises();

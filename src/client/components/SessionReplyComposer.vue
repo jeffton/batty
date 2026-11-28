@@ -12,13 +12,7 @@ const pending = ref(false);
 const errorMessage = ref("");
 const canSend = computed(() => props.enabled && !pending.value && !!draft.value.trim());
 let lastAttempt: { text: string; id: string } | undefined;
-const rejectedReplyCodes = new Set([
-  "BAD_INPUT",
-  "FORBIDDEN",
-  "NOT_FOUND",
-  "CONFLICT",
-  "UNAUTHORIZED",
-]);
+const rejectedReplyCodes = new Set(["FORBIDDEN", "NOT_FOUND", "CONFLICT", "UNAUTHORIZED"]);
 
 async function submit(): Promise<void> {
   if (!canSend.value) return;

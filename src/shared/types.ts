@@ -95,9 +95,15 @@ export interface UiAssistantMessage {
 }
 
 export type UiSteeringSender =
-  | { kind: "main"; name?: string }
+  | { kind: "main"; sessionId?: string; name?: string }
   | { kind: "agent"; sessionId: string; name?: string }
   | { kind: "peer"; name: string };
+
+export interface UiTransferOrigin {
+  instanceId: string;
+  label: string;
+  actor?: { kind: "agent" | "main"; sessionId: string };
+}
 
 export type UiMessage =
   | {
@@ -137,6 +143,8 @@ export type UiMessage =
       text: string;
       data?: Record<string, unknown>;
       steeringSender?: UiSteeringSender;
+      transferKind?: "assignment" | "resumed" | "queued" | "report" | "result";
+      transferOrigin?: UiTransferOrigin;
     };
 
 export interface ActiveToolRun {

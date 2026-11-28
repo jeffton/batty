@@ -1,13 +1,17 @@
 import type { SqliteDatabase } from "@earendil-works/pi-durable/storage/sqlite";
 import type { EntryRecord } from "@earendil-works/pi-durable";
-import { STEERING_REQUEST_PREFIX } from "./runtime-notices";
-
-interface SteeringSource {
+interface TransferReceipt {
   entry: number;
-  conversationId: number;
-  kind: "pi.tool" | "batty.node-command";
+  requestId: string;
+  callerId: number | null;
+  taskKind: string | null;
+  workerId: string | null;
+  childId: number | null;
+  runId: string | null;
+  previous: number | null;
+  action: string | null;
   grantId: string | null;
-  peerName: string | null;
+  peerOrigin: string | null;
 }
 
 // SQLite-specific read model. Triggers update in the same durable commit as the
@@ -147,20 +151,25 @@ export async function createHistoryIndex(db: SqliteDatabase) {
       );
       return row?.count ?? 0;
     },
-    async steeringSources(conversationId: number, entryIds: readonly string[]) {
+    async transferReceipts(conversationId: number, entryIds: readonly string[]) {
       if (!entryIds.length) return [];
-      return db.all<SteeringSource>(
-        `SELECT json_extract(s.record, '$.entry') AS entry, t.conversation_id AS conversationId,
-           json_extract(t.record, '$.kind') AS kind,
-           json_extract(t.record, '$.input.grantId') AS grantId,
-           json_extract(t.record, '$.input.steeringPeer.label') AS peerName
-         FROM submissions s JOIN tasks t
-           ON t.id = CAST(substr(json_extract(s.record, '$.requestId'), length(?) + 1) AS INTEGER)
-           AND json_extract(s.record, '$.requestId') = ? || t.id
+      const request = "json_extract(s.record, '$.requestId')";
+      const taskId = `substr(${request}, instr(${request}, ':') + 1)`;
+      return db.all<TransferReceipt>(
+        `SELECT json_extract(s.record, '$.entry') AS entry, ${request} AS requestId,
+           t.conversation_id AS callerId, json_extract(t.record, '$.kind') AS taskKind,
+           json_extract(t.record, '$.input.workerId') AS workerId,
+           json_extract(t.record, '$.input.childId') AS childId,
+           json_extract(t.record, '$.input.runId') AS runId,
+           json_extract(t.record, '$.input.previous') AS previous,
+           json_extract(t.record, '$.input.transferAction') AS action,
+           coalesce(json_extract(t.record, '$.input.grantId'),
+                    json_extract(t.record, '$.input.remoteAssignment.grantId')) AS grantId,
+           json_extract(t.record, '$.input.steeringPeer') AS peerOrigin
+         FROM submissions s LEFT JOIN tasks t
+           ON t.id = CAST(${taskId} AS INTEGER) AND ${taskId} = CAST(t.id AS TEXT)
          WHERE s.conversation_id = ? AND json_extract(s.record, '$.entry') IN (${entryIds.map(() => "?").join(",")})
-           AND t.kind IN ('"pi.tool"', '"batty.node-command"')`,
-        STEERING_REQUEST_PREFIX,
-        STEERING_REQUEST_PREFIX,
+           AND (${request} GLOB 'batty-*' OR ${request} GLOB 'remote:*' OR ${request} GLOB 'remote-result:*')`,
         conversationId,
         ...entryIds.map(Number),
       );

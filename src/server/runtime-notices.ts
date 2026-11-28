@@ -4,6 +4,12 @@ import type { ContextView } from "@earendil-works/pi-durable";
 
 export const BATTY_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice";
 export const STEERING_NOTICE_PREFIX = "Steering message from the calling agent:\n\n";
+export const ASSIGNMENT_NOTICE_PREFIX = [
+  "You are a subagent carrying out an assigned task, not the main assistant. Work only on this task in this execution scope.",
+  "Make your final response self-contained.",
+  "Assigned task:",
+  "",
+].join("\n\n");
 export const STEERING_REQUEST_PREFIX = "batty-steer:";
 const NOTICE_OPEN = "<batty-runtime-notice>";
 const NOTICE_CLOSE = "</batty-runtime-notice>";
@@ -114,14 +120,7 @@ export function projectRuntimeNoticeContext(view: ContextView): ContextView {
 export function buildSubagentRuntimeNotice(_depth: number, prompt: string): RuntimeNotice {
   return {
     kind: "subagent",
-    text: [
-      "You are a subagent carrying out an assigned task, not the main assistant. Work only on this task in this execution scope.",
-      "Make your final response self-contained.",
-      "Assigned task:",
-      prompt.trim(),
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
+    text: ASSIGNMENT_NOTICE_PREFIX + prompt.trim(),
   };
 }
 

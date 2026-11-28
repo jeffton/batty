@@ -4,7 +4,11 @@ import { computed, useId } from "vue";
 import { marked } from "marked";
 import { useCopyFeedback } from "@/client/lib/copy-feedback";
 import { isEmojiOnly } from "@/client/lib/emoji-only";
-import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE, STEERING_NOTICE_PREFIX } from "@/server/runtime-notices";
+import {
+  ASSIGNMENT_NOTICE_PREFIX,
+  BATTY_RUNTIME_NOTICE_CUSTOM_TYPE,
+  STEERING_NOTICE_PREFIX,
+} from "@/server/runtime-notices";
 import AgentTurnDiffPopover from "@/client/components/AgentTurnDiffPopover.vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
@@ -137,10 +141,29 @@ const steering = computed(() => {
     sender.kind === "agent"
       ? (sender.name ?? `Agent ${sender.sessionId}`)
       : (sender.name ?? "Batty");
+  const message = props.message;
+  const labels = {
+    assignment: "Assignment",
+    resumed: "Resumed",
+    queued: "Queued",
+    report: "Report",
+    result: "Result",
+  } as const;
+  const kind = message.transferKind;
+  const prefix = kind ? ASSIGNMENT_NOTICE_PREFIX : STEERING_NOTICE_PREFIX;
+  const markdown = runtimeNoticeContent.value?.markdown;
+  let body = message.text;
+  if (body.startsWith(prefix)) body = body.slice(prefix.length);
+  if (kind === "report" || kind === "result") {
+    const [heading, ...lines] = body.split("\n");
+    if (heading?.startsWith("[subagent ") && heading.endsWith(` ${kind}]`)) body = lines.join("\n");
+  }
   return {
     name,
-    sessionId: sender.kind === "agent" ? sender.sessionId : undefined,
-    body: props.message.text.slice(STEERING_NOTICE_PREFIX.length),
+    label: kind ? labels[kind] : "Steering",
+    sessionId: sender.kind === "peer" ? undefined : sender.sessionId,
+    body,
+    markdown,
   };
 });
 
@@ -319,7 +342,7 @@ async function copyAssistantMarkdown(): Promise<void> {
         <div class="message__text">
           <template v-if="steering">
             <div class="message__notice-actions message__steering-header">
-              <span>Steering from</span>
+              <span>{{ steering.label }} from</span>
               <button
                 v-if="props.allowSessionPopovers && steering.sessionId"
                 type="button"
@@ -338,7 +361,12 @@ async function copyAssistantMarkdown(): Promise<void> {
                 :session-id="steering.sessionId"
               />
             </div>
-            <div class="message__notice-text">{{ steering.body }}</div>
+            <MarkdownBlock
+              v-if="steering.markdown !== undefined"
+              class="message__runtime-markdown"
+              :text="steering.markdown"
+            />
+            <div v-else class="message__notice-text">{{ steering.body }}</div>
           </template>
           <template v-else-if="isRuntimeNotice">
             <div class="message__notice-text">
@@ -394,7 +422,12 @@ async function copyAssistantMarkdown(): Promise<void> {
             />
           </div>
           <div
-            v-if="props.allowSessionPopovers && subagentNoticeDetails && subagentNoticePopoverId"
+            v-if="
+              !steering &&
+              props.allowSessionPopovers &&
+              subagentNoticeDetails &&
+              subagentNoticePopoverId
+            "
             class="message__notice-actions"
           >
             <button

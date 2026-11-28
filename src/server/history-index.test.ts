@@ -69,7 +69,7 @@ test("50,000-entry archive uses transactional counts and indexed receipt/catch-u
   await storage.close(context);
 });
 
-test("steering history links an entry to the actual source task, not its recipient or matching text", async () => {
+test("agent notice receipts recover the actual task caller and assignment metadata", async () => {
   const db = await openNodeSqliteDatabase(":memory:");
   const storage = await SqliteStorage.open(db);
   try {
@@ -87,11 +87,21 @@ test("steering history links an entry to the actual source task, not its recipie
           JSON.stringify({ id: task, conversationId: sender, kind: "pi.tool" }),
         );
       }
+      await tx.run(
+        "INSERT INTO tasks VALUES (82, 7, ?, 'terminal', 0, 0, ?)",
+        JSON.stringify("batty.delivery"),
+        JSON.stringify({
+          kind: "batty.delivery",
+          input: { workerId: "9", childId: 9, previous: 72, transferAction: "queue" },
+        }),
+      );
       for (const [entry, requestId] of [
         [100, "batty-steer:80"],
         [101, "batty-steer:81"],
         [102, "ordinary-user-request"],
         [103, "batty-steer:80-other"],
+        [104, "batty-deliver:82"],
+        [105, "batty-report:82"],
       ] as const) {
         await tx.run(
           "INSERT INTO submissions VALUES (?, 9, ?, 'done', ?)",
@@ -101,11 +111,16 @@ test("steering history links an entry to the actual source task, not its recipie
         );
       }
     });
-    expect(await index.steeringSources(9, ["100", "101", "102", "103"])).toEqual([
-      { entry: 100, conversationId: 7, kind: "pi.tool", grantId: null, peerName: null },
-      { entry: 101, conversationId: 1, kind: "pi.tool", grantId: null, peerName: null },
+    expect(
+      await index.transferReceipts(9, ["100", "101", "102", "103", "104", "105"]),
+    ).toMatchObject([
+      { entry: 100, callerId: 7, taskKind: "pi.tool" },
+      { entry: 101, callerId: 1, taskKind: "pi.tool" },
+      { entry: 103, callerId: null, taskKind: null },
+      { entry: 104, callerId: 7, childId: 9, previous: 72, action: "queue" },
+      { entry: 105, callerId: 7, workerId: "9" },
     ]);
-    expect(await index.steeringSources(10, ["100"])).toEqual([]);
+    expect(await index.transferReceipts(10, ["100"])).toEqual([]);
   } finally {
     await storage.close(context);
   }

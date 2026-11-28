@@ -346,13 +346,13 @@ test("node lifecycle queues in order, handles steering and resumes the same work
   const db = await openNodeSqliteDatabase(join(directory, "session.sqlite"));
   try {
     const index = await createHistoryIndex(db);
-    expect(await index.steeringSources(Number(id), [String(steeringEntry.id)])).toEqual([
+    expect(await index.transferReceipts(Number(id), [String(steeringEntry.id)])).toMatchObject([
       {
         entry: steeringEntry.id,
-        conversationId: main.id,
-        kind: "batty.node-command",
+        callerId: main.id,
+        taskKind: "batty.node-command",
         grantId: "node-a",
-        peerName: "Office peer",
+        peerOrigin: JSON.stringify({ instanceId: "office", label: "Office peer" }),
       },
     ]);
   } finally {

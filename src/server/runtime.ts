@@ -57,10 +57,17 @@ import { createBrowserCleanup } from "./browser-cleanup";
 import { createOrchestration } from "./orchestration";
 import { networkAvailable, recoverNetwork } from "./network-recovery";
 import { MODEL_STREAM_IDLE_TIMEOUT_MS, withModelStreamTimeout } from "./model-stream-timeout";
-import { RemoteWorkers, parseRemoteSession } from "./remote-workers";
+import { RemoteWorkers, parseRemoteSession, remoteSessionId } from "./remote-workers";
 import { createMemory, type MemoryConfig } from "./memory";
 import { createResources } from "./resources";
-import type { SessionState, SessionMessagesPage, UiMessage, ModelOption } from "@/shared/types";
+import type {
+  SessionState,
+  SessionMessagesPage,
+  UiMessage,
+  ModelOption,
+  UiSteeringSender,
+  UiTransferOrigin,
+} from "@/shared/types";
 
 export const context = BACKGROUND_CONTEXT;
 const PAGE_SIZE = 120;
@@ -482,35 +489,123 @@ export class Runtime {
   ) {
     const page = await this.historyIndex.entries(conversationId, before, limit, after, maximum);
     const messages = entryMessages(page.entries);
-    if (conversationId !== this.main.id) await this.attachSteeringSenders(conversationId, messages);
+    await this.attachTransferSenders(conversationId, messages);
     return { messages, hasMoreMessages: page.hasMoreMessages, nextBefore: page.nextBefore };
   }
 
-  private async attachSteeringSenders(conversationId: ConversationId, messages: UiMessage[]) {
-    const steering = new Map(
+  private localTransferSender(sessionId: string): UiSteeringSender {
+    return sessionId === String(this.main.id)
+      ? { kind: "main", sessionId }
+      : { kind: "agent", sessionId };
+  }
+
+  transferSender(origin: UiTransferOrigin): UiSteeringSender {
+    const peer = this.remotes.access
+      .listConnections()
+      .find((item) => item.instanceId === origin.instanceId);
+    const name = peer?.label ?? origin.label;
+    if (peer && origin.actor?.kind === "agent") {
+      return {
+        kind: "agent",
+        sessionId: remoteSessionId(peer.id, origin.actor.sessionId),
+        name: `Agent ${origin.actor.sessionId} · ${name}`,
+      };
+    }
+    return { kind: "peer", name };
+  }
+
+  private async attachTransferSenders(conversationId: ConversationId, messages: UiMessage[]) {
+    const notices = new Map(
       messages.flatMap((message) =>
         message.role === "custom" &&
-        message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent` &&
-        message.text.startsWith(STEERING_NOTICE_PREFIX)
+        message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`
           ? [[message.id, message] as const]
           : [],
       ),
     );
-    for (const source of await this.historyIndex.steeringSources(conversationId, [
-      ...steering.keys(),
+    for (const source of await this.historyIndex.transferReceipts(conversationId, [
+      ...notices.keys(),
     ])) {
-      const message = steering.get(String(source.entry))!;
-      if (source.kind === "pi.tool") {
-        message.steeringSender =
-          source.conversationId === this.main.id
-            ? { kind: "main" }
-            : { kind: "agent", sessionId: String(source.conversationId) };
-      } else {
-        const name =
-          source.peerName ??
-          (source.grantId && this.remotes.access.pairedConnection(source.grantId)?.label);
-        if (name) message.steeringSender = { kind: "peer", name };
+      const message = notices.get(String(source.entry))!;
+      const action = source.requestId.split(":", 1)[0];
+      const isAssignment =
+        action === "batty-deliver" &&
+        source.taskKind === "batty.delivery" &&
+        source.childId === conversationId &&
+        source.runId === null;
+      const isSteering =
+        action === "batty-steer" &&
+        conversationId !== this.main.id &&
+        message.text.startsWith(STEERING_NOTICE_PREFIX) &&
+        (source.taskKind === "pi.tool" || source.taskKind === "batty.node-command");
+      if (isAssignment || isSteering) {
+        if (isAssignment)
+          message.transferKind =
+            source.action === "resume"
+              ? "resumed"
+              : source.action === "queue" || source.previous !== null
+                ? "queued"
+                : "assignment";
+        if (source.peerOrigin) {
+          message.transferOrigin = JSON.parse(source.peerOrigin) as UiTransferOrigin;
+          message.steeringSender = this.transferSender(message.transferOrigin);
+        } else if (source.grantId || source.taskKind === "batty.node-command") {
+          const peer = source.grantId && this.remotes.access.pairedConnection(source.grantId);
+          if (peer) message.steeringSender = { kind: "peer", name: peer.label };
+        } else if (source.callerId !== null) {
+          message.steeringSender = this.localTransferSender(String(source.callerId));
+        }
+        continue;
       }
+
+      const reported = message.data?.subagent as { sessionId?: string } | undefined;
+      if (!reported?.sessionId) continue;
+      const sessionId = reported.sessionId;
+      if (
+        action === "batty-progress" &&
+        source.taskKind === "pi.tool" &&
+        String(source.callerId) === sessionId
+      ) {
+        message.transferKind = "report";
+      } else if (
+        (action === "batty-report" &&
+          source.taskKind === "batty.delivery" &&
+          !source.runId &&
+          source.workerId === sessionId) ||
+        (action === "batty-join" &&
+          source.taskKind === "batty.await-child" &&
+          source.workerId === sessionId)
+      ) {
+        message.transferKind = "result";
+      } else {
+        const remote = parseRemoteSession(sessionId);
+        if (!remote) continue;
+        const [, node, messageOrAssignment, recipient] = source.requestId.split(":");
+        if (
+          action === "remote" &&
+          node === remote.node &&
+          messageOrAssignment === remote.session &&
+          /^\d+$/.test(recipient ?? "") &&
+          source.requestId === `${sessionId}:${recipient}`
+        ) {
+          message.transferKind = "report";
+        } else if (
+          action === "remote-result" &&
+          node === remote.node &&
+          /^\d+$/.test(messageOrAssignment ?? "") &&
+          source.requestId ===
+            `remote-result:${remote.node}:${messageOrAssignment}:${conversationId}`
+        ) {
+          message.transferKind = "result";
+        } else continue;
+        message.steeringSender = {
+          kind: "agent",
+          sessionId,
+          name: `Agent ${remote.session} · ${remote.node}`,
+        };
+        continue;
+      }
+      message.steeringSender = this.localTransferSender(sessionId);
     }
   }
 

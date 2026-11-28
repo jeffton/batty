@@ -22,7 +22,11 @@ test("five watched remote workers project only the worker whose event arrived", 
     streamId: "local",
     nextRevision: () => 2,
     state,
-    remotes: { changes, state: (id: string) => ({ id, historyCursor: "10" }) },
+    remotes: {
+      changes,
+      refreshTranscript: async () => false,
+      state: (id: string) => ({ id, historyCursor: "10" }),
+    },
   } as unknown as Runtime;
   const operations = createSessionOperations(runtime, {
     transcriptImages: { state: async (value) => value } as TranscriptImages,

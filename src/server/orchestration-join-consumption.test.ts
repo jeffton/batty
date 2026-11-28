@@ -212,7 +212,10 @@ test.each(["queued-first", "await-first", "await-first-reopen", "notice-first"])
           ? [m.details]
           : [],
       );
-      expect(presentations).toEqual(mode === "notice-first" ? [{}, {}] : [{ presentation }, {}]);
+      const source = { subagent: { sessionId: String(child.id) } };
+      expect(presentations).toEqual(
+        mode === "notice-first" ? [source, source] : [{ ...source, presentation }, source],
+      );
       const notices = messages.flatMap((m) => {
         const notice = m.role === "user" ? decodeRuntimeNotice(m.content) : undefined;
         return notice?.text.includes("unique child findings") ? [notice] : [];

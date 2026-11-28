@@ -427,7 +427,7 @@ export class RemoteWorkers {
         !["OFFLINE", "TIMEOUT", "NOT_FOUND", "UNAUTHORIZED", "FORBIDDEN"].includes(error.code)
       )
         throw error;
-      mirror.projectionError = error.message;
+      if (!mirror.projectionReady) mirror.projectionError = error.message;
       return false;
     }
   }

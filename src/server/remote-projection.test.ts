@@ -420,7 +420,12 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
       messages: [{ id: "100", text: "completed" }],
       remote: { connectionState: "offline", error: "Peer retired this worker" },
     });
+    const late = Promise.withResolvers<never>();
+    request.mockImplementationOnce(() => late.promise);
+    const slower = remotes.refreshTranscript("remote:work:123", signal);
     expect(await remotes.refreshTranscript("remote:work:123", signal)).toBe(true);
+    late.reject(new RpcError("OFFLINE", "Peer disconnected on another connection"));
+    expect(await slower).toBe(false);
     expect(request).toHaveBeenCalledWith(
       expect.objectContaining({ id: "work" }),
       "node.session.watch",
@@ -431,6 +436,7 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
       canReply: true,
       historyCursor: "100",
       isStreaming: false,
+      remote: { connectionState: "online" },
       messages: [
         {
           id: "100",
@@ -441,7 +447,7 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
     });
     expect(JSON.parse(await readFile(file, "utf8")).projectionReady).toBe(true);
     expect(await remotes.refreshTranscript("remote:work:123", signal)).toBe(false);
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(3);
   } finally {
     await remotes.close();
     await rm(root, { recursive: true, force: true });

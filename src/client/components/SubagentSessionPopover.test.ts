@@ -12,7 +12,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import type { SessionState } from "@/shared/types";
 import { RpcError } from "@/shared/rpc";
-import { getSessionMessages, replyToSession, stopCronRun, stopSubagent } from "@/client/lib/api";
+import { getSessionMessages, stopCronRun, stopSubagent } from "@/client/lib/api";
 import { rpcCall } from "@/client/lib/rpc";
 
 const nonLoadingStatus = '[role="status"]:not(.loading-indicator__status)';
@@ -39,7 +39,6 @@ const session = {
 
 vi.mock("@/client/lib/api", () => ({
   getSessionMessages: vi.fn(),
-  replyToSession: vi.fn(async () => ({ ok: true })),
   stopSubagent: vi.fn(async () => ({ ok: true })),
   stopCronRun: vi.fn(async () => ({ ok: true })),
 }));
@@ -145,7 +144,7 @@ test("a healthy local stream preserves remote offline status and disables action
   try {
     wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
     await flushPromises();
-    const send = async (offline: boolean, revision: number, canReply?: boolean) => {
+    const send = async (offline: boolean, revision: number) => {
       sources[0]!.onmessage!({
         data: JSON.stringify({
           type: "reset",
@@ -153,7 +152,6 @@ test("a healthy local stream preserves remote offline status and disables action
             ...session,
             revision,
             canStopSubagent: true,
-            canReply,
             remote: {
               nodeId: "mac",
               connectionState: offline ? "offline" : "online",
@@ -164,36 +162,18 @@ test("a healthy local stream preserves remote offline status and disables action
       });
       await flushPromises();
     };
-    await send(true, 2, true);
+    await send(true, 2);
     expect(wrapper.getComponent({ name: "SessionHeaderStatus" }).props("connectionState")).toBe(
       "offline",
     );
     expect(wrapper.get(nonLoadingStatus).text()).toContain("Last known: running");
     expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeDefined();
-    const reply = wrapper.get('textarea[aria-label="Reply"]');
-    await reply.setValue("Continue");
-    const form = wrapper.get("form.session-reply");
-    const submit = form.get('button[type="submit"]');
-    expect(submit.attributes("disabled")).toBeDefined();
-    await form.trigger("submit");
-    expect(replyToSession).not.toHaveBeenCalled();
-
-    await send(false, 3, true);
-    expect(submit.attributes("disabled")).toBeUndefined();
-    await form.trigger("submit");
-    await flushPromises();
-    expect(replyToSession).toHaveBeenCalledExactlyOnceWith(
-      "remote:mac:123",
-      "Continue",
-      expect.any(String),
-    );
+    await send(false, 3);
     expect(wrapper.getComponent({ name: "SessionHeaderStatus" }).props("connectionState")).toBe(
       "online",
     );
     expect(wrapper.find(nonLoadingStatus).exists()).toBe(false);
     expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeUndefined();
-    await send(false, 4);
-    expect(form.attributes("style")).toContain("display: none");
   } finally {
     wrapper.unmount();
   }

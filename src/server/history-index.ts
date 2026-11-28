@@ -12,7 +12,6 @@ interface TransferReceipt {
   action: string | null;
   grantId: string | null;
   peerOrigin: string | null;
-  ownerReply: 0 | 1;
 }
 
 // SQLite-specific read model. Triggers update in the same durable commit as the
@@ -166,9 +165,7 @@ export async function createHistoryIndex(db: SqliteDatabase) {
            json_extract(t.record, '$.input.transferAction') AS action,
            coalesce(json_extract(t.record, '$.input.grantId'),
                     json_extract(t.record, '$.input.remoteAssignment.grantId')) AS grantId,
-           json_extract(t.record, '$.input.steeringPeer') AS peerOrigin,
-           (json_extract(t.record, '$.input.args.action') IS 'reply' OR
-            json_extract(t.record, '$.input.notice.kind') IS 'owner') AS ownerReply
+           json_extract(t.record, '$.input.steeringPeer') AS peerOrigin
          FROM submissions s LEFT JOIN tasks t
            ON t.id = CAST(${taskId} AS INTEGER) AND ${taskId} = CAST(t.id AS TEXT)
          WHERE s.conversation_id = ? AND json_extract(s.record, '$.entry') IN (${entryIds.map(() => "?").join(",")})

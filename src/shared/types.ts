@@ -111,7 +111,6 @@ export type UiMessage =
       role: "user";
       timestamp: number;
       clientMessageId?: string;
-      sourcePeer?: string;
       blocks: UiContentBlock[];
     }
   | UiAssistantMessage
@@ -374,7 +373,6 @@ export interface SessionState {
   title?: string;
   isSubagentSession?: boolean;
   canStopSubagent?: boolean;
-  canReply?: boolean;
   isCronSession?: boolean;
 }
 

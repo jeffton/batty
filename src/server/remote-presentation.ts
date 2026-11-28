@@ -313,6 +313,7 @@ export async function exportNodeSessionEvent(
   const { state } = event;
   return {
     ...event,
+    senderProjection: true,
     state: {
       ...state,
       messages: await Promise.all(

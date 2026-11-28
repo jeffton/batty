@@ -146,8 +146,6 @@ export function createOrchestration(
   return {
     extension,
     nodeCommand: nodeCommands.execute,
-    replyToWorker: (sessionId: string, prompt: string, requestId: string) =>
-      nodeCommands.execute(null, requestId, { action: "reply", sessionId, prompt }),
     queryWorkers: (args: import("./orchestration-workers").WorkerCommand) =>
       workers.query(args, context),
     remoteJoinTask: RemoteJoin,

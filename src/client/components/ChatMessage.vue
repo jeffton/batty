@@ -556,7 +556,6 @@ async function copyAssistantMarkdown(): Promise<void> {
     </div>
 
     <div v-else class="message__body">
-      <small v-if="props.message.sourcePeer">Via {{ props.message.sourcePeer }}</small>
       <template
         v-for="(block, index) in props.message.blocks"
         :key="`${props.message.id}-${index}`"

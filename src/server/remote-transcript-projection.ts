@@ -56,8 +56,6 @@ function refreshMessage(cached: UiMessage, message: NodeMessage, node: string, n
     );
     return { ...cached, steeringSender, transferKind, transferOrigin };
   }
-  if (cached.role === "user" && message.role === "user")
-    return { ...cached, sourcePeer: message.sourcePeer };
   if (cached.role === "assistant" && message.role === "assistant")
     return { ...cached, directDelivery: message.directDelivery };
   return cached;
@@ -80,14 +78,13 @@ export async function refreshTranscriptProjection(
       if (event?.type === "error") throw new Error(event.message);
       if (event?.type !== "reset") continue;
       const { state } = event;
-      if (state.canReply === undefined) return false;
+      if (!event.senderProjection) return false;
       for (const message of state.messages) {
         const cached = archived.get(message.id);
         if (cached) refreshed.set(message.id, refreshMessage(cached, message, mirror.node, name));
       }
       if (Number(state.historyCursor) < end && state.hasMoreRecentMessages) continue;
       mirror.messages = mirror.messages.map((message) => refreshed.get(message.id) ?? message);
-      mirror.state!.canReply = state.canReply;
       mirror.projectionReady = true;
       return true;
     }

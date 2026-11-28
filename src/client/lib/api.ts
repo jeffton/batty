@@ -416,9 +416,6 @@ export function removeMainQueuedPrompt(kind: "steer" | "followUp", index: number
 export function stopSubagent(sessionId: string) {
   return value("session.stop", { sessionId });
 }
-export function replyToSession(sessionId: string, text: string, clientMessageId: string) {
-  return value("session.reply", { sessionId, text, clientMessageId });
-}
 export function getSession(sessionId: string) {
   return query("session.get", { sessionId });
 }

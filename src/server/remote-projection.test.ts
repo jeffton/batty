@@ -391,9 +391,9 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
         start(controller) {
           controller.enqueue({
             type: "reset",
+            senderProjection: true,
             state: {
               ...sourceState(2, "ignored live fields"),
-              canReply: true,
               historyCursor: "100",
               messages: [
                 {
@@ -433,7 +433,6 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
       { signal },
     );
     expect(remotes.state("remote:work:123")).toMatchObject({
-      canReply: true,
       historyCursor: "100",
       isStreaming: false,
       remote: { connectionState: "online" },

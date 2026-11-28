@@ -6,8 +6,7 @@ import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
-import SessionReplyComposer from "@/client/components/SessionReplyComposer.vue";
-import { getSessionMessages, replyToSession, stopSubagent, stopCronRun } from "@/client/lib/api";
+import { getSessionMessages, stopSubagent, stopCronRun } from "@/client/lib/api";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { sessionHistoryCursor } from "@/client/lib/session-stream";
 import { RpcError } from "@/shared/rpc";
@@ -50,24 +49,6 @@ const displayedConnectionState = computed(() =>
 let connection: ReturnType<typeof createSessionConnection> | undefined;
 let loadGeneration = 0;
 let streamError: string | undefined;
-const viewportStyle = ref<Record<string, string>>();
-let viewportEvents: AbortController | undefined;
-
-function watchViewport(): void {
-  const viewport = window.visualViewport;
-  if (!viewport) return;
-  const resize = () => {
-    viewportStyle.value = {
-      "--full-popover-viewport-top": `${viewport.offsetTop}px`,
-      "--full-popover-viewport-bottom": `${window.innerHeight - viewport.offsetTop - viewport.height}px`,
-    };
-  };
-  viewportEvents?.abort();
-  viewportEvents = new AbortController();
-  viewport.addEventListener("resize", resize, { signal: viewportEvents.signal });
-  viewport.addEventListener("scroll", resize, { signal: viewportEvents.signal });
-  resize();
-}
 
 function closeStream(): void {
   connection?.close();
@@ -172,10 +153,6 @@ async function loadOlderMessages(): Promise<void> {
   }
 }
 
-function sendReply(text: string, clientMessageId: string): Promise<{ ok: true }> {
-  return replyToSession(props.sessionId, text, clientMessageId);
-}
-
 async function stop(): Promise<void> {
   if (!canStop.value || stopping.value || displayedConnectionState.value !== "online") return;
   const generation = loadGeneration;
@@ -194,12 +171,10 @@ async function stop(): Promise<void> {
 function handlePopoverToggle(event: Event): void {
   const nextState = (event as Event & { newState?: "open" | "closed" }).newState;
   if (nextState === "open") {
-    watchViewport();
     void ensureSessionLoaded();
     return;
   }
 
-  viewportEvents?.abort();
   loadGeneration += 1;
   closeStream();
   loading.value = false;
@@ -223,7 +198,6 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  viewportEvents?.abort();
   loadGeneration += 1;
   closeStream();
 });
@@ -234,7 +208,6 @@ onBeforeUnmount(() => {
     class="subagent-session-popover"
     :popover-id="props.popoverId"
     :title="props.headerTitle"
-    :style="viewportStyle"
     close-label="Close subagent transcript"
     @toggle="handlePopoverToggle"
   >
@@ -297,13 +270,6 @@ onBeforeUnmount(() => {
         always-show-details
         :allow-session-popovers="true"
       />
-      <SessionReplyComposer
-        v-if="session"
-        v-show="session.canReply"
-        :key="props.sessionId"
-        :enabled="session.canReply === true && displayedConnectionState === 'online'"
-        :send="sendReply"
-      />
     </div>
   </FullPopover>
 </template>
@@ -320,7 +286,6 @@ onBeforeUnmount(() => {
 
 .subagent-session-popover__body {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   min-height: 0;
 }

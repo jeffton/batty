@@ -57,7 +57,6 @@ export type WorkerCommand = AttachmentSelection & {
     | "queue"
     | "resume"
     | "steer"
-    | "reply"
     | "stop"
     | "report"
     | "list"
@@ -92,7 +91,6 @@ export type WorkerCommandContext = Pick<
   remoteAssignment?: { grantId: string; requestId: string };
   inputFiles?: WorkerInputFile[];
   steeringPeer?: AuthenticatedSteeringPeer;
-  ownerReply?: true;
 };
 
 function missingWorker(id: string) {
@@ -489,8 +487,6 @@ export function createWorkers(
       workspaceId: Type.Optional(Type.String()),
     }),
     execute: async (args: WorkerCommand, api: WorkerCommandContext, ctx: Context) => {
-      const ownerReply = args.action === "reply" && api.ownerReply === true;
-      if (args.action === "reply" && !ownerReply) throw new Error("Reply requires an owner");
       if (
         (args.artifactRefs !== undefined || args.browserId !== undefined) &&
         args.action !== "report"
@@ -514,10 +510,7 @@ export function createWorkers(
         throw new Error(
           "run creates a new subagent; omit sessionId. Use queue or resume for an existing session",
         );
-      if (
-        ["await", "queue", "resume", "steer", "stop", "reply"].includes(args.action) &&
-        !args.sessionId
-      )
+      if (["await", "queue", "resume", "steer", "stop"].includes(args.action) && !args.sessionId)
         throw new Error(`${args.action} requires sessionId`);
       if (args.action === "report") {
         if (args.sessionId !== undefined)
@@ -822,11 +815,10 @@ export function createWorkers(
         }, ctx);
         return reply(`Steered. Session ID: ${workerId}`);
       }
-      const ws = ownerReply
-        ? undefined
-        : await services.workspace(args.workspaceId ?? worker?.workspaceId, api.conversationId);
-      const ownerNotice = ownerReply ? { kind: "owner" as const, text: args.prompt } : undefined;
-      const ownerTarget = ownerReply ? await api.conversation(worker!.id, ctx) : undefined;
+      const ws = await services.workspace(
+        args.workspaceId ?? worker?.workspaceId,
+        api.conversationId,
+      );
       const inherited = await api.agent(ctx);
       const change = modelChange(args.model, args.effort);
       const admit = () =>
@@ -850,25 +842,6 @@ export function createWorkers(
             currentWorker?.active === undefined ? undefined : await tx.task(currentWorker.active);
           const currentlyRunning =
             currentTask !== undefined && currentTask.state.status !== "terminal";
-          if (ownerNotice) {
-            const metadata = await tx.doc(WorkerDoc, currentWorker!.id);
-            if (!metadata.isSubagent || metadata.isCron)
-              throw new Error("This session does not accept replies");
-            const completion = metadata.completion;
-            if (currentlyRunning && completion && !completion.retiring) {
-              const active = await tx.task(completion.owner);
-              if (active && active.state.status !== "terminal") {
-                await ownerTarget!.submit(tx, {
-                  type: "input",
-                  content: encodeRuntimeNotice(ownerNotice),
-                  whenBusy: "steer",
-                  requestId: STEERING_REQUEST_PREFIX + api.taskId,
-                });
-                call.call = { workerId: String(currentWorker!.id), taskId: completion.owner };
-                return { ...call.call };
-              }
-            }
-          }
           if (args.action === "resume" && currentlyRunning)
             throw new Error("Subagent is running; use queue or steer");
           if (args.action === "queue" && !currentlyRunning)
@@ -883,7 +856,7 @@ export function createWorkers(
               tx,
               owner,
               api.conversationId,
-              ws!,
+              ws,
               args.prompt!,
               inherited,
               change,
@@ -895,7 +868,7 @@ export function createWorkers(
             childId: child,
             mainId: doc.mainId!,
             prompt: args.prompt!,
-            notice: ownerNotice ?? buildSubagentRuntimeNotice(0, args.prompt!),
+            notice: buildSubagentRuntimeNotice(0, args.prompt!),
             ...(args.action === "run" || args.action === "resume" || args.action === "queue"
               ? { transferAction: args.action }
               : {}),
@@ -903,12 +876,10 @@ export function createWorkers(
             ...(files.length ? { files } : {}),
             report: api.remoteAssignment === undefined,
             ...(api.remoteAssignment ? { remoteAssignment: api.remoteAssignment } : {}),
-            ...(ws ? { change: { ...change, cwd: ws.path } as RunChange, workspaceId: ws.id } : {}),
+            change: { ...change, cwd: ws.path } as RunChange,
+            workspaceId: ws.id,
           };
-          if (
-            (args.action === "queue" || (ownerReply && currentlyRunning)) &&
-            currentWorker?.active !== undefined
-          )
+          if (args.action === "queue" && currentWorker?.active !== undefined)
             input.previous = currentWorker.active;
           const taskId = await tx.createTask(Delivery, input, {
             ownership: { kind: "conversation" },
@@ -921,20 +892,19 @@ export function createWorkers(
           return { workerId: id, taskId };
         }, ctx);
       const result = await admit();
-      services.harness.resume();
-      if (ownerReply) return reply("Reply accepted.");
       await api.details(
         {
           conversationId: Number(result.workerId),
           subagent: {
             sessionId: result.workerId,
             prompt: args.prompt,
-            workspaceId: ws!.id,
+            workspaceId: ws.id,
             respondIn: "session",
           },
         },
         ctx,
       );
+      services.harness.resume();
       return reply(`Started. Session ID: ${result.workerId}`);
     },
   };

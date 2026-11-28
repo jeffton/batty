@@ -5,7 +5,7 @@ export function queuedPromptDisplay(
   content: string | { type: string; text?: string }[],
 ): Pick<QueuedPrompt, "text" | "runtimeNoticeKind"> {
   const notice = decodeRuntimeNotice(content);
-  if (notice?.kind === "system" || notice?.kind === "owner") return { text: notice.text };
+  if (notice?.kind === "system") return { text: notice.text };
   if (notice) {
     const display = notice.data?.runtimeNotice as { text: string; markdown: string } | undefined;
     return {

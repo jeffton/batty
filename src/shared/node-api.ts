@@ -31,6 +31,7 @@ export type NodeMessage = Exclude<UiMessage, UiAssistantMessage> | NodeAssistant
 export type NodeSessionEvent =
   | Extract<ServerEvent, { type: "state" | "tools" | "error" }>
   | (Omit<Extract<ServerEvent, { type: "reset" }>, "state"> & {
+      senderProjection?: true;
       state: Omit<SessionState, "messages" | "activeAssistant"> & {
         messages: NodeMessage[];
         activeAssistant?: NodeAssistantMessage;

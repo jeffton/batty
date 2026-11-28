@@ -29,12 +29,8 @@ export function projectEntry(entry: EntryRecord): MemoryLeaf[] {
               .join("\n");
       const notice = decodeRuntimeNotice(message.content);
       append(
-        (notice && notice.kind !== "owner") || entry.kind === "batty.import-note" ? "note" : "user",
-        notice?.kind === "owner"
-          ? notice.text
-          : notice
-            ? `Runtime ${notice.kind}: ${notice.text}`
-            : text,
+        notice || entry.kind === "batty.import-note" ? "note" : "user",
+        notice ? `Runtime ${notice.kind}: ${notice.text}` : text,
         message.timestamp,
       );
     } else if (message.role === "assistant") {

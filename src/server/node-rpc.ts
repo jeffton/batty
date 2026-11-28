@@ -112,16 +112,12 @@ export function createNodeRpcHandler(
         !command ||
         typeof body.requestId !== "string" ||
         !body.requestId.trim() ||
-        !["run", "resume", "queue", "steer", "stop", "list", "inspect", "await", "reply"].includes(
+        !["run", "resume", "queue", "steer", "stop", "list", "inspect", "await"].includes(
           command.action,
         ) ||
         ("nodeId" in command && command.nodeId) ||
         ("files" in command && command.files !== undefined) ||
         command.sessionId?.startsWith("remote:") ||
-        (command.action === "reply" &&
-          (!/^\d+$/.test(command.sessionId ?? "") ||
-            typeof command.prompt !== "string" ||
-            !command.prompt.trim())) ||
         (input.actor !== undefined &&
           (!["agent", "main"].includes(input.actor?.kind) ||
             typeof input.actor.sessionId !== "string" ||
@@ -150,11 +146,11 @@ export function createNodeRpcHandler(
         body.requestId,
         command,
         files,
-        ["run", "resume", "queue", "steer", "reply"].includes(command.action)
+        ["run", "resume", "queue", "steer"].includes(command.action)
           ? {
               instanceId: connection.instanceId ?? connection.id,
               label: connection.label,
-              ...(input.actor && command.action !== "reply" ? { actor: input.actor } : {}),
+              ...(input.actor ? { actor: input.actor } : {}),
             }
           : undefined,
       );

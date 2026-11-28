@@ -273,7 +273,7 @@ export class RemoteWorkers {
               (a, b) => Number(a.id.split(":")[0]) - Number(b.id.split(":")[0]),
             );
             mirror.state = { ...state, messages: [] };
-            if ((!mirror.after || mirror.after === "0") && state.canReply !== undefined)
+            if ((!mirror.after || mirror.after === "0") && event.senderProjection)
               mirror.projectionReady = true;
             // Deliver before advancing the durable cursor. Remote request IDs deduplicate after a local crash.
             for (const message of state.messages) await this.deliver(mirror, message);
@@ -440,14 +440,6 @@ export class RemoteWorkers {
     });
     if (result.isError) throw new Error(JSON.stringify(result.output));
   }
-  async reply(target: { node: string; session: string }, prompt: string, requestId: string) {
-    const result = await this.nodeRequest(this.connection(target.node), "node.command", {
-      requestId: `owner-reply:${requestId}`,
-      command: { action: "reply", sessionId: target.session, prompt },
-    });
-    if (result.isError)
-      throw new RpcError("BAD_INPUT", (result.output as Array<{ text: string }>)[0]!.text);
-  }
   workspaces(node: string): Promise<NodeDiscovery[]>;
   workspaces(node?: string): Promise<Array<NodeDiscovery | NodeDiscoveryError>>;
   async workspaces(node?: string) {
@@ -555,8 +547,6 @@ export class RemoteWorkers {
       historyAfter: after,
       historyCursor: includeHistory ? cursor : undefined,
       canStopSubagent: !mirror.error && !mirror.syncedTerminal && mirror.state.canStopSubagent,
-      canReply:
-        !remoteError && Boolean(this.access.getConnection(mirror.node)) && mirror.state.canReply,
       ...(mirror.syncedTerminal
         ? {
             isStreaming: false,

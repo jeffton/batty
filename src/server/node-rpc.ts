@@ -112,12 +112,20 @@ export function createNodeRpcHandler(
         !command ||
         typeof body.requestId !== "string" ||
         !body.requestId.trim() ||
-        !["run", "resume", "queue", "steer", "stop", "list", "inspect", "await"].includes(
+        !["run", "resume", "queue", "steer", "stop", "list", "inspect", "await", "reply"].includes(
           command.action,
         ) ||
         ("nodeId" in command && command.nodeId) ||
         ("files" in command && command.files !== undefined) ||
-        command.sessionId?.startsWith("remote:")
+        command.sessionId?.startsWith("remote:") ||
+        (command.action === "reply" &&
+          (!/^\d+$/.test(command.sessionId ?? "") ||
+            typeof command.prompt !== "string" ||
+            !command.prompt.trim())) ||
+        (input.actor !== undefined &&
+          (!["agent", "main"].includes(input.actor?.kind) ||
+            typeof input.actor.sessionId !== "string" ||
+            !/^\d+$/.test(input.actor.sessionId)))
       )
         throw new RpcError("BAD_INPUT", "Invalid node worker action or requestId");
       let files;
@@ -142,8 +150,12 @@ export function createNodeRpcHandler(
         body.requestId,
         command,
         files,
-        command.action === "steer"
-          ? { instanceId: connection.instanceId ?? connection.id, label: connection.label }
+        ["run", "resume", "queue", "steer"].includes(command.action)
+          ? {
+              instanceId: connection.instanceId ?? connection.id,
+              label: connection.label,
+              ...(input.actor ? { actor: input.actor } : {}),
+            }
           : undefined,
       );
       const { details, ...reply } = result;

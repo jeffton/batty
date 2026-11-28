@@ -148,9 +148,16 @@ export type RunChange = {
   model?: ModelRef | null;
   thinkingLevel?: ModelThinkingLevel | null;
 };
+export interface AuthenticatedSteeringPeer {
+  instanceId: string;
+  label: string;
+  actor?: { kind: "agent" | "main"; sessionId: string };
+}
 export type DeliveryInput = {
   delivery?: CronDelivery;
   remoteAssignment?: { grantId: string; requestId: string };
+  steeringPeer?: AuthenticatedSteeringPeer;
+  transferAction?: "run" | "resume" | "queue";
   workerId: string;
   childId: ConversationId;
   mainId: ConversationId;

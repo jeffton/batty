@@ -7,7 +7,7 @@ export const STEERING_NOTICE_PREFIX = "Steering message from the calling agent:\
 export const STEERING_REQUEST_PREFIX = "batty-steer:";
 const NOTICE_OPEN = "<batty-runtime-notice>";
 const NOTICE_CLOSE = "</batty-runtime-notice>";
-export type RuntimeNoticeKind = "cron" | "subagent" | "system";
+export type RuntimeNoticeKind = "cron" | "subagent" | "system" | "owner";
 export interface RuntimeNotice {
   kind: RuntimeNoticeKind;
   text: string;
@@ -32,7 +32,7 @@ export function decodeRuntimeNotice(content: unknown): RuntimeNotice | undefined
     const notice = JSON.parse(content.slice(NOTICE_OPEN.length, -NOTICE_CLOSE.length));
     if (
       !notice ||
-      !["cron", "subagent", "system"].includes(notice.kind) ||
+      !["cron", "subagent", "system", "owner"].includes(notice.kind) ||
       typeof notice.text !== "string"
     )
       return undefined;

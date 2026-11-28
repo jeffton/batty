@@ -10,10 +10,7 @@ import type { JsonValue } from "@earendil-works/chord/json";
 import type { WorkerInputFile } from "./worker-files";
 import type { WorkerCommand, WorkerCommandContext } from "./orchestration-workers";
 
-interface AuthenticatedSteeringPeer {
-  instanceId: string;
-  label: string;
-}
+import type { AuthenticatedSteeringPeer } from "./orchestration-state";
 
 type CommandResult = {
   output?: JsonValue;
@@ -45,7 +42,7 @@ export function createRemoteCommands(
   const Command = defineTask<
     {
       args: WorkerCommand;
-      grantId: string;
+      grantId: string | null;
       requestId: string;
       files?: WorkerInputFile[];
       steeringPeer?: AuthenticatedSteeringPeer;
@@ -70,8 +67,12 @@ export function createRemoteCommands(
           waitForTask: runtime.waitForTask.bind(runtime),
           conversation: (id, context) => harness.conversation(id, context),
           details: async () => {},
-          remoteAssignment: { grantId: task.input.grantId, requestId: task.input.requestId },
+          ...(task.input.grantId !== null
+            ? { remoteAssignment: { grantId: task.input.grantId, requestId: task.input.requestId } }
+            : {}),
           inputFiles: task.input.files,
+          steeringPeer: task.input.steeringPeer,
+          ...(task.input.args.action === "reply" ? { ownerReply: true } : {}),
         };
         let result: CommandResult;
         try {
@@ -98,13 +99,15 @@ export function createRemoteCommands(
   return {
     Command,
     async execute(
-      grantId: string,
+      grantId: string | null,
       requestId: string,
       args: WorkerCommand,
       files?: WorkerInputFile[],
       steeringPeer?: AuthenticatedSteeringPeer,
     ) {
-      if (!requestId.trim()) throw new Error("Node command requires requestId");
+      if (!requestId.trim()) throw new Error("Worker command requires requestId");
+      if (grantId === null && args.action !== "reply")
+        throw new Error("Owner commands only support replying");
       if (args.action === "report") throw new Error("Reports originate in the assigned worker");
       const { harness, main } = host();
       const id = await main.commit(async (tx) => {

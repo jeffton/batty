@@ -412,6 +412,14 @@ export class RemoteWorkers {
     });
     if (result.isError) throw new Error(JSON.stringify(result.output));
   }
+  async reply(target: { node: string; session: string }, prompt: string, requestId: string) {
+    const result = await this.nodeRequest(this.connection(target.node), "node.command", {
+      requestId: `owner-reply:${requestId}`,
+      command: { action: "reply", sessionId: target.session, prompt },
+    });
+    if (result.isError)
+      throw new RpcError("BAD_INPUT", (result.output as Array<{ text: string }>)[0]!.text);
+  }
   workspaces(node: string): Promise<NodeDiscovery[]>;
   workspaces(node?: string): Promise<Array<NodeDiscovery | NodeDiscoveryError>>;
   async workspaces(node?: string) {
@@ -517,6 +525,7 @@ export class RemoteWorkers {
       historyAfter: after,
       historyCursor: includeHistory ? cursor : undefined,
       canStopSubagent: !mirror.error && !mirror.syncedTerminal && mirror.state.canStopSubagent,
+      canReply: Boolean(this.access.getConnection(mirror.node)) && mirror.state.canReply,
       ...(mirror.syncedTerminal
         ? {
             isStreaming: false,
@@ -625,6 +634,17 @@ export class RemoteWorkers {
       {
         requestId,
         command: { ...workerInput, action },
+        ...(["run", "resume", "queue", "steer"].includes(action)
+          ? {
+              actor: {
+                kind:
+                  api.conversationId === this.runtime.main.id
+                    ? ("main" as const)
+                    : ("agent" as const),
+                sessionId: String(api.conversationId),
+              },
+            }
+          : {}),
         ...(files.length ? { files: workerFileMetadata(files) } : {}),
       },
       files.length ? { body: workerBody(files), signal: AbortSignal.timeout(300_000) } : {},

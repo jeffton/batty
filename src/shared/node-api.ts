@@ -16,6 +16,7 @@ export type NodeCommandInput = {
     action: Exclude<WorkerCommand["action"], "report" | "workspaces">;
   };
   files?: WorkerFileMetadata[];
+  actor?: { kind: "agent" | "main"; sessionId: string };
 };
 
 export type NodeFile = Omit<SentFileDescriptor, "storedPath">;

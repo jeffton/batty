@@ -452,6 +452,7 @@ export class Runtime {
       activeTools,
       title: role === "assistant" ? "Batty" : role === "cron" ? "Cron" : "Subagent",
       isSubagentSession: role !== "assistant",
+      canReply: role === "assistant" || (worker?.isSubagent === true && !worker.isCron),
       canStopSubagent:
         role === "worker" && (await this.orchestration.canStopWorker(String(conversation.id))),
       isCronSession: role === "cron",

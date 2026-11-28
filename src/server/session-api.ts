@@ -14,6 +14,7 @@ import { preparePromptFiles, type UploadedFile } from "./uploads";
 import { parseRemoteSession } from "./remote-workers";
 import { observeSession } from "./session-observer";
 import { observeAppStatus } from "./app-status-stream";
+import { encodeRuntimeNotice } from "./runtime-notices";
 import { rpcEvents, splitByteStream } from "../shared/rpc";
 
 function badInput(message: string): never {
@@ -106,6 +107,43 @@ export function createSessionOperations(
     else await runtime.orchestration.stopWorker(sessionId);
     return { ok: true as const };
   });
+  add("session.reply", async ({ sessionId, text, clientMessageId }, rpc) => {
+    if (
+      typeof sessionId !== "string" ||
+      typeof text !== "string" ||
+      !text.trim() ||
+      typeof clientMessageId !== "string" ||
+      !clientMessageId ||
+      /^(?:batty-|remote:|remote-result:)/.test(clientMessageId)
+    )
+      badInput("Invalid reply");
+
+    rpc.signal.throwIfAborted();
+    const remote = parseRemoteSession(sessionId);
+    if (remote) await runtime.remotes.reply(remote, text, clientMessageId);
+    else {
+      const target = await runtime.conversation(sessionId);
+      if (target.id === runtime.main.id) {
+        await runtime.useDefaultModel();
+        const content = encodeRuntimeNotice({ kind: "owner", text });
+        const submission = await target.submit(
+          {
+            type: "input",
+            content,
+            requestId: `owner-reply:${clientMessageId}`,
+            whenBusy: "steer",
+          },
+          context,
+        );
+        await retainInput(target, submission.id, content, clientMessageId);
+      } else {
+        const result = await runtime.orchestration.replyToWorker(sessionId, text, clientMessageId);
+        if (result.isError)
+          throw new RpcError("BAD_INPUT", (result.details as { error: string }).error);
+      }
+    }
+    return { ok: true as const };
+  });
   streaming("session.watch", async ({ sessionId, after }, rpc) => {
     const remote = parseRemoteSession(sessionId);
     const conversation = remote ? undefined : await runtime.conversation(sessionId);
@@ -166,7 +204,9 @@ export function createSessionOperations(
       if (
         !["prompt", "steer"].includes(input.kind) ||
         typeof input.text !== "string" ||
-        (input.clientMessageId !== undefined && typeof input.clientMessageId !== "string")
+        (input.clientMessageId !== undefined &&
+          (typeof input.clientMessageId !== "string" ||
+            /^(?:batty-|remote:|remote-result:|owner-reply:)/.test(input.clientMessageId)))
       )
         badInput("Invalid prompt");
       if (input.correlationId && /^[a-f0-9-]{36}$/.test(input.correlationId))

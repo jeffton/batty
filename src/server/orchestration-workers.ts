@@ -46,6 +46,7 @@ import {
   type DeliveryInput,
   type RunChange,
   type OrchestrationServices,
+  type AuthenticatedSteeringPeer,
 } from "./orchestration-state.js";
 import type { createDeliveryTask } from "./orchestration-delivery.js";
 
@@ -56,6 +57,7 @@ export type WorkerCommand = AttachmentSelection & {
     | "queue"
     | "resume"
     | "steer"
+    | "reply"
     | "stop"
     | "report"
     | "list"
@@ -89,6 +91,8 @@ export type WorkerCommandContext = Pick<
 > & {
   remoteAssignment?: { grantId: string; requestId: string };
   inputFiles?: WorkerInputFile[];
+  steeringPeer?: AuthenticatedSteeringPeer;
+  ownerReply?: true;
 };
 
 function missingWorker(id: string) {
@@ -485,6 +489,8 @@ export function createWorkers(
       workspaceId: Type.Optional(Type.String()),
     }),
     execute: async (args: WorkerCommand, api: WorkerCommandContext, ctx: Context) => {
+      const ownerReply = args.action === "reply" && api.ownerReply === true;
+      if (args.action === "reply" && !ownerReply) throw new Error("Reply requires an owner");
       if (
         (args.artifactRefs !== undefined || args.browserId !== undefined) &&
         args.action !== "report"
@@ -508,7 +514,10 @@ export function createWorkers(
         throw new Error(
           "run creates a new subagent; omit sessionId. Use queue or resume for an existing session",
         );
-      if (["await", "queue", "resume", "steer", "stop"].includes(args.action) && !args.sessionId)
+      if (
+        ["await", "queue", "resume", "steer", "stop", "reply"].includes(args.action) &&
+        !args.sessionId
+      )
         throw new Error(`${args.action} requires sessionId`);
       if (args.action === "report") {
         if (args.sessionId !== undefined)
@@ -648,6 +657,15 @@ export function createWorkers(
       const active =
         worker?.active === undefined ? undefined : await api.getTask(worker.active, ctx);
       const running = active !== undefined && active.state.status !== "terminal";
+      if (ownerReply) {
+        const metadata = await api.snapshot(WorkerDoc, worker!.id, ctx);
+        if (!metadata?.isSubagent || metadata.isCron)
+          throw new Error("This session does not accept replies");
+        args = {
+          ...args,
+          action: !running ? "resume" : metadata.completion ? "steer" : "queue",
+        };
+      }
       if (
         args.action === "await" &&
         !api.remoteAssignment &&
@@ -779,7 +797,9 @@ export function createWorkers(
           : []);
       if (args.action === "steer") {
         const content = await encodeWorkerNotice(
-          buildSubagentSteeringRuntimeNotice(args.prompt),
+          ownerReply
+            ? { kind: "owner", text: args.prompt }
+            : buildSubagentSteeringRuntimeNotice(args.prompt),
           files,
         );
         const child = (await api.conversation(worker!.id, ctx))!;
@@ -864,7 +884,13 @@ export function createWorkers(
             childId: child,
             mainId: doc.mainId!,
             prompt: args.prompt!,
-            notice: buildSubagentRuntimeNotice(0, args.prompt!),
+            notice: ownerReply
+              ? { kind: "owner", text: args.prompt! }
+              : buildSubagentRuntimeNotice(0, args.prompt!),
+            ...(args.action === "run" || args.action === "resume" || args.action === "queue"
+              ? { transferAction: args.action }
+              : {}),
+            ...(api.steeringPeer ? { steeringPeer: api.steeringPeer } : {}),
             ...(files.length ? { files } : {}),
             report: api.remoteAssignment === undefined,
             ...(api.remoteAssignment ? { remoteAssignment: api.remoteAssignment } : {}),

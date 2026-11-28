@@ -297,6 +297,13 @@ export function normalizeMessage(
 
   if (message.role === "user") {
     const notice = decodeRuntimeNotice(message.content);
+    if (notice?.kind === "owner")
+      return {
+        id: messageId("user", message.timestamp, index),
+        role: "user",
+        timestamp: message.timestamp,
+        blocks: [{ type: "text", text: notice.text }],
+      };
     if (notice) {
       const direct = notice.data?.directDelivery as { text: string } | undefined;
       if ((notice.kind === "cron" || notice.kind === "system") && direct) {

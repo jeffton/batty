@@ -7,6 +7,8 @@ import { Runtime, context } from "./runtime";
 import { resolveSentFile } from "./send-files";
 import { preparePromptFiles } from "./uploads";
 import { ArtifactResolver } from "./artifact-resolver";
+import { createSessionOperations } from "./session-api";
+import { TranscriptImages } from "./transcript-images";
 import {
   test,
   storageRoot,
@@ -22,6 +24,105 @@ import {
 } from "./remote-workers.integration-fixtures";
 
 export function registerRemoteWorkerExecutionTests() {
+  test("owner replies resume a finished worker and steer it over the paired peer connection", async () => {
+    const directory = await mkdtemp(join(storageRoot, "batty-owner-worker-reply-"));
+    let a: Awaited<ReturnType<typeof openInstance>> | undefined;
+    let b: Awaited<ReturnType<typeof openInstance>> | undefined;
+    try {
+      a = await openInstance(directory, "a");
+      b = await openInstance(directory, "b");
+      await connect(a, b);
+      const remote = b;
+      const results: string[] = [];
+      remote.faux.setResponses(
+        Array.from({ length: 15 }, () => (request) => {
+          const last = request.messages.findLast((message) => message.role === "user")!;
+          const content = JSON.stringify(last.content);
+          if (content.includes("Please continue") && request.messages.at(-1)?.role === "user")
+            return fauxAssistantMessage(
+              [
+                fauxToolCall("bash", {
+                  command: "touch entered; until test -f release; do sleep .05; done",
+                }),
+              ],
+              { stopReason: "toolUse" },
+            );
+          if (content.includes("Paired owner correction")) results.push(last.role);
+          return fauxAssistantMessage([fauxText("NO_REPLY")]);
+        }),
+      );
+      const started = await remote.runtime.orchestration.nodeCommand("independent", "first", {
+        action: "run",
+        workspaceId: "work",
+        prompt: "Initial assignment",
+      });
+      const target = /Session ID: (\d+)/.exec(JSON.stringify(started.output))![1]!;
+      await eventually(
+        async () => (await remote.runtime.orchestration.listRunning()).length === 0,
+        "first assignment complete",
+      );
+      const reply = (
+        instance: typeof remote,
+        sessionId: string,
+        text: string,
+        clientMessageId: string,
+      ) => {
+        const api = createSessionOperations(instance.runtime, {
+          transcriptImages: new TranscriptImages(join(directory, "images")),
+        });
+        return api.get("session.reply")!(
+          { sessionId, text, clientMessageId },
+          { signal: new AbortController().signal },
+        );
+      };
+      expect(await reply(remote, target, "Please continue", "local-reply-1")).toMatchObject({
+        value: { ok: true },
+      });
+      await eventually(
+        async () => Boolean(await readFile(join(remote.work, "entered")).catch(() => false)),
+        "owner resumed worker",
+      );
+      const local = a;
+      const mirror = `remote:${remote.id}:${target}`;
+      await eventually(async () => {
+        try {
+          return (await local.runtime.state(mirror)).canReply === true;
+        } catch {
+          return false;
+        }
+      }, "paired worker reply capability");
+      const correction = "Paired owner correction";
+      await Promise.all([
+        reply(local, mirror, correction, "paired-reply-1"),
+        reply(local, mirror, correction, "paired-reply-1"),
+      ]);
+      await writeFile(join(remote.work, "release"), "release");
+      await eventually(
+        async () => (await remote.runtime.orchestration.listRunning()).length === 0,
+        "correction settles",
+      );
+      const state = await remote.runtime.state(target);
+      const text = (message: (typeof state.messages)[number]) =>
+        message.role === "user" ? message.blocks[0] : undefined;
+      expect(
+        state.messages
+          .map(text)
+          .filter((block) => block?.type === "text" && block.text === "Please continue"),
+      ).toHaveLength(1);
+      expect(
+        state.messages
+          .map(text)
+          .filter((block) => block?.type === "text" && block.text === correction),
+      ).toHaveLength(1);
+      expect(results).toEqual(["user"]);
+    } finally {
+      if (b) await writeFile(join(b.work, "release"), "release");
+      await a?.close();
+      await b?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 45_000);
+
   test("bidirectional peers discover independently started workers without claiming them in Tasks", async () => {
     const directory = await mkdtemp(join(storageRoot, "batty-peer-task-ownership-"));
     const instances: Awaited<ReturnType<typeof openInstance>>[] = [];

@@ -111,6 +111,7 @@ export type UiMessage =
       role: "user";
       timestamp: number;
       clientMessageId?: string;
+      sourcePeer?: string;
       blocks: UiContentBlock[];
     }
   | UiAssistantMessage

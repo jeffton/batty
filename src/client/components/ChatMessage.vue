@@ -192,25 +192,6 @@ const cronNoticePopoverId = computed(() => {
   return `cron-notice-popover-${cronNoticeDetails.value.runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
 });
 
-const subagentNoticeDetails = computed(() => {
-  if (props.message.role !== "custom") {
-    return undefined;
-  }
-  const subagent = props.message.data?.subagent;
-  if (!subagent || typeof subagent !== "object") {
-    return undefined;
-  }
-  const details = subagent as Record<string, unknown>;
-  return typeof details.sessionId === "string" ? { sessionId: details.sessionId } : undefined;
-});
-
-const subagentNoticePopoverId = computed(() => {
-  if (!subagentNoticeDetails.value) {
-    return undefined;
-  }
-  return `subagent-notice-popover-${subagentNoticeDetails.value.sessionId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
-});
-
 const assistantErrorText = computed(() => {
   if (props.message.role !== "assistant") {
     return undefined;
@@ -421,29 +402,6 @@ async function copyAssistantMarkdown(): Promise<void> {
               :session-id="cronNoticeDetails.sessionId"
             />
           </div>
-          <div
-            v-if="
-              !steering &&
-              props.allowSessionPopovers &&
-              subagentNoticeDetails &&
-              subagentNoticePopoverId
-            "
-            class="message__notice-actions"
-          >
-            <button
-              type="button"
-              class="message__notice-btn"
-              :popovertarget="subagentNoticePopoverId"
-            >
-              <PanelRightOpen :size="14" />
-              Open subagent session
-            </button>
-            <SubagentSessionPopover
-              :popover-id="subagentNoticePopoverId"
-              header-title="Subagent"
-              :session-id="subagentNoticeDetails.sessionId"
-            />
-          </div>
         </div>
       </div>
     </div>
@@ -598,6 +556,7 @@ async function copyAssistantMarkdown(): Promise<void> {
     </div>
 
     <div v-else class="message__body">
+      <small v-if="props.message.sourcePeer">Via {{ props.message.sourcePeer }}</small>
       <template
         v-for="(block, index) in props.message.blocks"
         :key="`${props.message.id}-${index}`"

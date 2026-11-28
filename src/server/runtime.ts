@@ -517,8 +517,9 @@ export class Runtime {
   private async attachTransferSenders(conversationId: ConversationId, messages: UiMessage[]) {
     const notices = new Map(
       messages.flatMap((message) =>
-        message.role === "custom" &&
-        message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`
+        (message.role === "custom" &&
+          message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`) ||
+        (message.role === "user" && conversationId !== this.main.id)
           ? [[message.id, message] as const]
           : [],
       ),
@@ -528,6 +529,18 @@ export class Runtime {
     ])) {
       const message = notices.get(String(source.entry))!;
       const action = source.requestId.split(":", 1)[0];
+      if (message.role === "user") {
+        if (
+          source.ownerReply &&
+          source.peerOrigin &&
+          ((action === "batty-steer" && source.taskKind === "batty.node-command") ||
+            (action === "batty-deliver" &&
+              source.taskKind === "batty.delivery" &&
+              source.childId === conversationId))
+        )
+          message.sourcePeer = (JSON.parse(source.peerOrigin) as UiTransferOrigin).label;
+        continue;
+      }
       const isAssignment =
         action === "batty-deliver" &&
         source.taskKind === "batty.delivery" &&

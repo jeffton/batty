@@ -75,9 +75,11 @@ export function registerRemoteWorkerExecutionTests() {
           { signal: new AbortController().signal },
         );
       };
-      expect(await reply(remote, target, "Please continue", "local-reply-1")).toMatchObject({
-        value: { ok: true },
-      });
+      const localReplies = await Promise.all([
+        reply(remote, target, "Please continue", "local-reply-1"),
+        reply(remote, target, "Second owner note", "local-reply-2"),
+      ]);
+      expect(localReplies.map((item) => item.value)).toEqual([{ ok: true }, { ok: true }]);
       await eventually(
         async () => Boolean(await readFile(join(remote.work, "entered")).catch(() => false)),
         "owner resumed worker",
@@ -112,9 +114,15 @@ export function registerRemoteWorkerExecutionTests() {
       expect(
         state.messages
           .map(text)
-          .filter((block) => block?.type === "text" && block.text === correction),
+          .filter((block) => block?.type === "text" && block.text === "Second owner note"),
       ).toHaveLength(1);
-      expect(results).toEqual(["user"]);
+      expect(
+        state.messages.filter((message) => {
+          const block = text(message);
+          return block?.type === "text" && block.text === correction;
+        }),
+      ).toMatchObject([{ role: "user", sourcePeer: expect.any(String) }]);
+      expect(results).toContain("user");
     } finally {
       if (b) await writeFile(join(b.work, "release"), "release");
       await a?.close();

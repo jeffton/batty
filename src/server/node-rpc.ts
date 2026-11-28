@@ -150,11 +150,11 @@ export function createNodeRpcHandler(
         body.requestId,
         command,
         files,
-        ["run", "resume", "queue", "steer"].includes(command.action)
+        ["run", "resume", "queue", "steer", "reply"].includes(command.action)
           ? {
               instanceId: connection.instanceId ?? connection.id,
               label: connection.label,
-              ...(input.actor ? { actor: input.actor } : {}),
+              ...(input.actor && command.action !== "reply" ? { actor: input.actor } : {}),
             }
           : undefined,
       );

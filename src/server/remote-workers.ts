@@ -892,9 +892,16 @@ export class RemoteWorkers {
     }
     if (message.role !== "custom") return message;
     const sender = message.steeringSender;
-    if (sender?.kind === "main") {
+    if (message.transferOrigin) {
+      // The connected peer can vouch for its own sender sessions, not for IDs
+      // on a third installation (including this one).
+      message = {
+        ...message,
+        steeringSender: { kind: "peer", name: message.transferOrigin.label },
+      };
+    } else if (sender?.kind === "main") {
       message = { ...message, steeringSender: { kind: "main", name: this.connection(node).label } };
-    } else if (sender?.kind === "agent") {
+    } else if (sender?.kind === "agent" && /^\d+$/.test(sender.sessionId)) {
       message = {
         ...message,
         steeringSender: {
@@ -902,6 +909,11 @@ export class RemoteWorkers {
           sessionId: remoteSessionId(node, sender.sessionId),
           name: `Agent ${sender.sessionId} · ${this.connection(node).label}`,
         },
+      };
+    } else if (sender?.kind === "agent") {
+      message = {
+        ...message,
+        steeringSender: { kind: "peer", name: sender.name ?? sender.sessionId },
       };
     }
     if (!message.data) return message;

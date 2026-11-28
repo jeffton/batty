@@ -82,7 +82,7 @@ export interface UiAssistantMessage {
   timestamp: number;
   turnPhase: UiAssistantTurnPhase;
   runTaskId?: string;
-  directDelivery?: { sessionId: string; runId: string };
+  directDelivery?: { kind: "system" } | { kind: "cron"; sessionId: string; runId: string };
   historicalPresentation?: true;
   blocks: UiContentBlock[];
   model?: string;
@@ -93,6 +93,11 @@ export interface UiAssistantMessage {
   sentFiles?: SentFileDescriptor[];
   sites?: SiteAttachmentDescriptor[];
 }
+
+export type UiSteeringSender =
+  | { kind: "main"; name?: string }
+  | { kind: "agent"; sessionId: string; name?: string }
+  | { kind: "peer"; name: string };
 
 export type UiMessage =
   | {
@@ -131,6 +136,7 @@ export type UiMessage =
       customType: string;
       text: string;
       data?: Record<string, unknown>;
+      steeringSender?: UiSteeringSender;
     };
 
 export interface ActiveToolRun {

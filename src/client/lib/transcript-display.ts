@@ -61,6 +61,7 @@ function transcriptSections(entries: TranscriptMessageView[]): TranscriptSection
 
 function collapsedMessage(entry: TranscriptMessageView): TranscriptMessageView | undefined {
   const original = entry.message;
+  if (original.role === "assistant" && original.directDelivery) return entry;
   const source =
     original.role === "assistant" && hasNoReplyText(original.blocks)
       ? { ...original, blocks: original.blocks.filter((block) => block.type !== "text") }
@@ -72,7 +73,10 @@ function collapsedMessage(entry: TranscriptMessageView): TranscriptMessageView |
 function hasExpandableDetails(entry: TranscriptMessageView): boolean {
   const message = entry.message;
   if (isTranscriptDetailsMessageRole(message.role)) return true;
-  if (message.role === "assistant" && hasNoReplyText(message.blocks)) return true;
+  if (message.role === "assistant") {
+    if (message.directDelivery) return false;
+    if (hasNoReplyText(message.blocks)) return true;
+  }
 
   return (
     "blocks" in message &&
@@ -149,15 +153,16 @@ export function buildTranscriptDisplayEntries(
 ): TranscriptDisplayResult {
   const deliveryDetails = (entry: TranscriptMessageView): TranscriptMessageView | undefined => {
     const message = entry.message;
-    if (message.role !== "assistant" || !message.directDelivery) return undefined;
+    if (message.role !== "assistant" || message.directDelivery?.kind !== "cron") return undefined;
+    const { sessionId, runId } = message.directDelivery;
     return {
       message: {
         id: `${message.id}:delivery`,
         role: "custom",
         timestamp: message.timestamp,
         customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`,
-        text: `Cron ${message.directDelivery.sessionId} result`,
-        data: { cron: message.directDelivery },
+        text: `Cron ${sessionId} result`,
+        data: { cron: { sessionId, runId } },
       },
       toolStatesByCallId: new Map(),
     };

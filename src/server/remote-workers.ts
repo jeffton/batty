@@ -870,7 +870,21 @@ export class RemoteWorkers {
           : assistant.blocks,
       };
     }
-    if (message.role !== "custom" || !message.data) return message;
+    if (message.role !== "custom") return message;
+    const sender = message.steeringSender;
+    if (sender?.kind === "main") {
+      message = { ...message, steeringSender: { kind: "main", name: this.connection(node).label } };
+    } else if (sender?.kind === "agent") {
+      message = {
+        ...message,
+        steeringSender: {
+          kind: "agent",
+          sessionId: remoteSessionId(node, sender.sessionId),
+          name: `Agent ${sender.sessionId} · ${this.connection(node).label}`,
+        },
+      };
+    }
+    if (!message.data) return message;
     const key = message.customType.startsWith("batty-runtime-notice:")
       ? "runtimePresentation"
       : "presentation";

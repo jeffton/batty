@@ -10,6 +10,11 @@ import type { JsonValue } from "@earendil-works/chord/json";
 import type { WorkerInputFile } from "./worker-files";
 import type { WorkerCommand, WorkerCommandContext } from "./orchestration-workers";
 
+interface AuthenticatedSteeringPeer {
+  instanceId: string;
+  label: string;
+}
+
 type CommandResult = {
   output?: JsonValue;
   details?: JsonValue;
@@ -38,7 +43,13 @@ export function createRemoteCommands(
   host: () => { harness: Harness; main: Conversation },
 ) {
   const Command = defineTask<
-    { args: WorkerCommand; grantId: string; requestId: string; files?: WorkerInputFile[] },
+    {
+      args: WorkerCommand;
+      grantId: string;
+      requestId: string;
+      files?: WorkerInputFile[];
+      steeringPeer?: AuthenticatedSteeringPeer;
+    },
     { phase: "execute" },
     CommandResult
   >({
@@ -91,6 +102,7 @@ export function createRemoteCommands(
       requestId: string,
       args: WorkerCommand,
       files?: WorkerInputFile[],
+      steeringPeer?: AuthenticatedSteeringPeer,
     ) {
       if (!requestId.trim()) throw new Error("Node command requires requestId");
       if (args.action === "report") throw new Error("Reports originate in the assigned worker");
@@ -106,7 +118,13 @@ export function createRemoteCommands(
         receipt.args = serialized;
         receipt.taskId = await tx.createTask(
           Command,
-          { args, grantId, requestId, ...(files ? { files } : {}) },
+          {
+            args,
+            grantId,
+            requestId,
+            ...(files ? { files } : {}),
+            ...(steeringPeer ? { steeringPeer } : {}),
+          },
           { ownership: { kind: "conversation" }, background: true },
         );
         return receipt.taskId;

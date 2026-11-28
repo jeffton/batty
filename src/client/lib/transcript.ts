@@ -113,7 +113,7 @@ function hiddenAssistantErrorIds(messages: UiMessage[], isStreaming: boolean): S
       latestErrorId = undefined;
       continue;
     }
-    if (message.role !== "assistant") {
+    if (message.role !== "assistant" || message.directDelivery) {
       continue;
     }
 

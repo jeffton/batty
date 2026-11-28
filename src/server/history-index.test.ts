@@ -69,6 +69,48 @@ test("50,000-entry archive uses transactional counts and indexed receipt/catch-u
   await storage.close(context);
 });
 
+test("steering history links an entry to the actual source task, not its recipient or matching text", async () => {
+  const db = await openNodeSqliteDatabase(":memory:");
+  const storage = await SqliteStorage.open(db);
+  try {
+    const index = await createHistoryIndex(db);
+    await db.transaction(async (tx) => {
+      for (const [task, sender] of [
+        [80, 7],
+        [81, 1],
+      ]) {
+        await tx.run(
+          "INSERT INTO tasks VALUES (?, ?, ?, 'terminal', 0, 0, ?)",
+          task!,
+          sender!,
+          JSON.stringify("pi.tool"),
+          JSON.stringify({ id: task, conversationId: sender, kind: "pi.tool" }),
+        );
+      }
+      for (const [entry, requestId] of [
+        [100, "batty-steer:80"],
+        [101, "batty-steer:81"],
+        [102, "ordinary-user-request"],
+        [103, "batty-steer:80-other"],
+      ] as const) {
+        await tx.run(
+          "INSERT INTO submissions VALUES (?, 9, ?, 'done', ?)",
+          entry + 10,
+          JSON.stringify(requestId),
+          JSON.stringify({ entry, requestId }),
+        );
+      }
+    });
+    expect(await index.steeringSources(9, ["100", "101", "102", "103"])).toEqual([
+      { entry: 100, conversationId: 7, kind: "pi.tool", grantId: null, peerName: null },
+      { entry: 101, conversationId: 1, kind: "pi.tool", grantId: null, peerName: null },
+    ]);
+    expect(await index.steeringSources(10, ["100"])).toEqual([]);
+  } finally {
+    await storage.close(context);
+  }
+});
+
 test("indexed pagination and bounded catch-up retain archived messages across invisible entries", async () => {
   const db = await openNodeSqliteDatabase(":memory:");
   const storage = await SqliteStorage.open(db);

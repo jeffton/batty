@@ -93,6 +93,44 @@ async function state(page: Page, value: string) {
   );
 }
 
+for (const width of [390, 1280]) {
+  test(`steering identifies the actual sender and opens its session at ${width}px`, async () => {
+    const hasTouch = width === 390;
+    const page = await browser.newPage({ viewport: { width, height: 800 }, hasTouch });
+    try {
+      await page.goto(url);
+      await state(page, "steering-senders");
+      const first = page
+        .locator(".message--custom")
+        .filter({ hasText: "Original priority correction" });
+      const second = page.locator(".message--custom").filter({ hasText: "Second correction" });
+      const sender = { name: "Open session: Agent 42", exact: true };
+      const button = first.getByRole("button", sender);
+      const popover = await button.getAttribute("popovertarget");
+      expect(popover).not.toBe(
+        await second.getByRole("button", sender).getAttribute("popovertarget"),
+      );
+      const mirroredButton = page.locator("#mirrored-steering button[popovertarget]").first();
+      expect(popover).not.toBe(await mirroredButton.getAttribute("popovertarget"));
+      expect(await page.locator(`[id="${popover}"]`).count()).toBe(1);
+      await page.locator(".message--user").getByText("Actual user input").waitFor();
+      await page.getByText("Batty", { exact: true }).waitFor();
+      await page.getByText("Office peer", { exact: true }).waitFor();
+      expect(await page.getByRole("button", { name: /Open session:/ }).count()).toBe(2);
+      await page.getByText(/Steering message from the calling agent:.*Unknown sender/s).waitFor();
+
+      if (hasTouch) await button.tap();
+      else {
+        await button.focus();
+        await page.keyboard.press("Enter");
+      }
+      await page.locator(`[id="${popover}"]:popover-open`).waitFor();
+    } finally {
+      await page.close();
+    }
+  });
+}
+
 for (const width of [390]) {
   test(`commentary artifacts render immediately, survive a later final and cache reload at ${width}px`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
@@ -162,6 +200,33 @@ for (const width of [390]) {
       await page.close();
     }
   });
+  test(`a standalone notification cannot open adjacent transcript details at ${width}px`, async () => {
+    const page = await browser.newPage({ viewport: { width, height: 800 }, hasTouch: true });
+    try {
+      await page.goto(url);
+      await state(page, "system-delivery");
+      const message = (text: string) =>
+        page.locator(".message--assistant").filter({ hasText: text });
+      const notification = message("Nightly backup failed");
+      await notification.waitFor();
+      const options = { name: "Show details", exact: true };
+      expect(await notification.getByRole("button", options).count()).toBe(0);
+      expect(await page.getByRole("button", options).count()).toBe(2);
+
+      await message("Codemode live; spacing still running").getByRole("button", options).tap();
+      await page.getByText("Header spacing task details", { exact: true }).waitFor();
+      expect(await page.getByRole("button", { name: "Open cron session" }).count()).toBe(0);
+      await notification.waitFor();
+
+      await message("Morning report").getByRole("button", options).tap();
+      await page.getByRole("button", { name: "Open cron session" }).waitFor();
+      expect(await page.getByText("Header spacing task details", { exact: true }).count()).toBe(0);
+      expect(await notification.getByRole("button", { name: "Show details" }).count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  });
+
   test(`empty cron response never creates a bubble or Copy action at ${width}px`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 800 } });
     try {

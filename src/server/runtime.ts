@@ -40,7 +40,11 @@ import {
   markNewArtifactPresentationDatabase,
 } from "./artifact-presentation-migration";
 import { queuedPromptDisplay } from "./queued-prompt-display";
-import { projectRuntimeNoticeRequest } from "./runtime-notices";
+import {
+  BATTY_RUNTIME_NOTICE_CUSTOM_TYPE,
+  projectRuntimeNoticeRequest,
+  STEERING_NOTICE_PREFIX,
+} from "./runtime-notices";
 import { projectProviderImages } from "./provider-images";
 import { createHistoryIndex } from "./history-index";
 import { createMemorySearch } from "./memory-search";
@@ -477,7 +481,36 @@ export class Runtime {
   ) {
     const page = await this.historyIndex.entries(conversationId, before, limit, after, maximum);
     const messages = entryMessages(page.entries);
+    if (conversationId !== this.main.id) await this.attachSteeringSenders(conversationId, messages);
     return { messages, hasMoreMessages: page.hasMoreMessages, nextBefore: page.nextBefore };
+  }
+
+  private async attachSteeringSenders(conversationId: ConversationId, messages: UiMessage[]) {
+    const steering = new Map(
+      messages.flatMap((message) =>
+        message.role === "custom" &&
+        message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent` &&
+        message.text.startsWith(STEERING_NOTICE_PREFIX)
+          ? [[message.id, message] as const]
+          : [],
+      ),
+    );
+    for (const source of await this.historyIndex.steeringSources(conversationId, [
+      ...steering.keys(),
+    ])) {
+      const message = steering.get(String(source.entry))!;
+      if (source.kind === "pi.tool") {
+        message.steeringSender =
+          source.conversationId === this.main.id
+            ? { kind: "main" }
+            : { kind: "agent", sessionId: String(source.conversationId) };
+      } else {
+        const name =
+          source.peerName ??
+          (source.grantId && this.remotes.access.pairedConnection(source.grantId)?.label);
+        if (name) message.steeringSender = { kind: "peer", name };
+      }
+    }
   }
 
   private async attachClientIds(conversationId: ConversationId, messages: UiMessage[]) {

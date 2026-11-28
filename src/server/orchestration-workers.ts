@@ -31,6 +31,7 @@ import type { WorkspaceInfo } from "../shared/types.js";
 import {
   buildSubagentRuntimeNotice,
   buildSubagentSteeringRuntimeNotice,
+  STEERING_REQUEST_PREFIX,
   decodeRuntimeNotice,
   encodeRuntimeNotice,
 } from "./runtime-notices.js";
@@ -783,7 +784,7 @@ export function createWorkers(
         );
         const child = (await api.conversation(worker!.id, ctx))!;
         await api.commit(async (tx) => {
-          const requestId = `batty-steer:${api.taskId}`;
+          const requestId = STEERING_REQUEST_PREFIX + api.taskId;
           if (await tx.submissionByRequest(worker!.id, requestId)) return;
           const completion = (await tx.doc(WorkerDoc, worker!.id)).completion;
           if (

@@ -71,7 +71,7 @@ test.each([false, true])(
     ).toMatchObject({
       role: "assistant",
       blocks: [{ type: "text", text: "3,26 km i Fur" }],
-      directDelivery: { sessionId: "596297", runId: "run-1" },
+      directDelivery: { kind: "cron", sessionId: "596297", runId: "run-1" },
     });
   },
 );

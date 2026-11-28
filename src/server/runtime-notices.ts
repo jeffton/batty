@@ -3,6 +3,8 @@ import type { Context, Message } from "@earendil-works/pi-ai";
 import type { ContextView } from "@earendil-works/pi-durable";
 
 export const BATTY_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice";
+export const STEERING_NOTICE_PREFIX = "Steering message from the calling agent:\n\n";
+export const STEERING_REQUEST_PREFIX = "batty-steer:";
 const NOTICE_OPEN = "<batty-runtime-notice>";
 const NOTICE_CLOSE = "</batty-runtime-notice>";
 export type RuntimeNoticeKind = "cron" | "subagent" | "system";
@@ -124,7 +126,7 @@ export function buildSubagentRuntimeNotice(_depth: number, prompt: string): Runt
 }
 
 export function buildSubagentSteeringRuntimeNotice(prompt: string): RuntimeNotice {
-  return { kind: "subagent", text: `Steering message from the calling agent:\n\n${prompt.trim()}` };
+  return { kind: "subagent", text: STEERING_NOTICE_PREFIX + prompt.trim() };
 }
 
 export function buildCronRuntimeNotice({

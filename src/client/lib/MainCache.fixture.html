@@ -3,6 +3,7 @@
   <body>
     <script type="module">
       import { reactive } from "vue";
+      import { installationStorageKey } from "./installation-storage.ts";
       import {
         CacheSuspendedError,
         readMainCache,
@@ -14,6 +15,7 @@
       window.cache = {
         CacheSuspendedError,
         reactive,
+        installationStorageKey,
         readMainCache,
         readMainCachePage,
         saveMainCache,

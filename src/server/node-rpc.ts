@@ -142,6 +142,9 @@ export function createNodeRpcHandler(
         body.requestId,
         command,
         files,
+        command.action === "steer"
+          ? { instanceId: connection.instanceId ?? connection.id, label: connection.label }
+          : undefined,
       );
       const { details, ...reply } = result;
       if (command.action === "inspect") {

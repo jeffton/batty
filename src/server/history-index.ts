@@ -1,5 +1,14 @@
 import type { SqliteDatabase } from "@earendil-works/pi-durable/storage/sqlite";
 import type { EntryRecord } from "@earendil-works/pi-durable";
+import { STEERING_REQUEST_PREFIX } from "./runtime-notices";
+
+interface SteeringSource {
+  entry: number;
+  conversationId: number;
+  kind: "pi.tool" | "batty.node-command";
+  grantId: string | null;
+  peerName: string | null;
+}
 
 // SQLite-specific read model. Triggers update in the same durable commit as the
 // archive, so a crash cannot lose counts or require a full startup replay.
@@ -137,6 +146,24 @@ export async function createHistoryIndex(db: SqliteDatabase) {
         conversationId,
       );
       return row?.count ?? 0;
+    },
+    async steeringSources(conversationId: number, entryIds: readonly string[]) {
+      if (!entryIds.length) return [];
+      return db.all<SteeringSource>(
+        `SELECT json_extract(s.record, '$.entry') AS entry, t.conversation_id AS conversationId,
+           json_extract(t.record, '$.kind') AS kind,
+           json_extract(t.record, '$.input.grantId') AS grantId,
+           json_extract(t.record, '$.input.steeringPeer.label') AS peerName
+         FROM submissions s JOIN tasks t
+           ON t.id = CAST(substr(json_extract(s.record, '$.requestId'), length(?) + 1) AS INTEGER)
+           AND json_extract(s.record, '$.requestId') = ? || t.id
+         WHERE s.conversation_id = ? AND json_extract(s.record, '$.entry') IN (${entryIds.map(() => "?").join(",")})
+           AND t.kind IN ('"pi.tool"', '"batty.node-command"')`,
+        STEERING_REQUEST_PREFIX,
+        STEERING_REQUEST_PREFIX,
+        conversationId,
+        ...entryIds.map(Number),
+      );
     },
     async clientIds(
       conversationId: number,

@@ -13,12 +13,15 @@
     <script type="module">
       import { createApp, h, ref } from "vue";
       import { createPinia } from "pinia";
+      import ChatMessage from "./ChatMessage.vue";
       import SessionTranscriptView from "./SessionTranscriptView.vue";
       import "../styles.css";
       import { saveMainCache, readMainCache } from "../lib/main-cache.ts";
       import { mergeSessionState } from "../lib/session-state.ts";
       import { applyServerEvent } from "../lib/session-events.ts";
       import { commentaryAttachments } from "../test/commentary-attachments.ts";
+      import { normalizeMessage } from "../../server/pi-state.ts";
+      import { encodeRuntimeNotice, STEERING_NOTICE_PREFIX } from "../../server/runtime-notices.ts";
 
       const attachmentMessages = () => {
         const messages = commentaryAttachments();
@@ -52,7 +55,7 @@
             role: "assistant",
             timestamp: 3,
             turnPhase: "final",
-            directDelivery: { sessionId: "cron", runId: "cron-run" },
+            directDelivery: { kind: "cron", sessionId: "cron", runId: "cron-run" },
             blocks: [{ type: "text", text: "Independent reminder" }],
           },
         );
@@ -103,6 +106,7 @@
         session.value = (await readMainCache()).session;
       }
       const always = ref(false);
+      const mirroredSteering = ref();
       document.addEventListener("fixture-state", async ({ detail }) => {
         if (detail === "attachments") {
           session.value = {
@@ -162,6 +166,60 @@
             ],
             isStreaming: false,
           };
+        if (detail === "steering-senders") {
+          const steering = (id, body, steeringSender) => ({
+            id,
+            role: "custom",
+            customType: "batty-runtime-notice:subagent",
+            timestamp: 4,
+            text: STEERING_NOTICE_PREFIX + body,
+            steeringSender,
+          });
+          always.value = true;
+          mirroredSteering.value = steering("first", "Mirrored correction", {
+            kind: "agent",
+            sessionId: "remote:office:43",
+          });
+          session.value = {
+            ...session.value,
+            messages: [
+              { ...user, blocks: [{ type: "text", text: "Actual user input" }] },
+              steering("first", "Original priority correction", { kind: "agent", sessionId: "42" }),
+              steering("second", "Second correction", { kind: "agent", sessionId: "42" }),
+              steering("main", "Reply from the main agent", { kind: "main" }),
+              steering("peer", "Remote request", { kind: "peer", name: "Office peer" }),
+              steering("unknown", "Unknown sender"),
+            ],
+            isStreaming: false,
+          };
+        }
+        if (detail === "system-delivery") {
+          const direct = (kind, text, metadata = {}) =>
+            normalizeMessage(
+              {
+                role: "user",
+                timestamp: 5,
+                content: encodeRuntimeNotice({
+                  kind,
+                  text: "Internal delivery",
+                  data: { directDelivery: { text }, ...metadata },
+                }),
+              },
+              kind === "system" ? 0 : 1,
+            );
+          session.value = {
+            ...session.value,
+            messages: [
+              user,
+              work,
+              notice,
+              reply,
+              direct("system", "Nightly backup failed"),
+              direct("cron", "Morning report", { cron: { sessionId: "42", runId: "cron-run" } }),
+            ],
+            isStreaming: false,
+          };
+        }
         if (detail === "silent-image")
           session.value = {
             ...session.value,
@@ -299,12 +357,17 @@
           };
       });
       createApp({
-        setup: () => () =>
+        setup: () => () => [
           h(SessionTranscriptView, {
             session: session.value,
             loadOlderMessages: async () => {},
             alwaysShowDetails: always.value,
           }),
+          mirroredSteering.value &&
+            h("div", { id: "mirrored-steering", hidden: true }, [
+              h(ChatMessage, { message: mirroredSteering.value }),
+            ]),
+        ],
       })
         .use(createPinia())
         .mount("#app");

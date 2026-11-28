@@ -188,7 +188,7 @@ test("direct cron reply controls reveal only their own source session", async ()
       timestamp: 4,
       turnPhase: "final" as const,
       blocks: [{ type: "text" as const, text: id }],
-      directDelivery: { sessionId: `worker-${id}`, runId: id },
+      directDelivery: { kind: "cron" as const, sessionId: `worker-${id}`, runId: id },
     })),
   ];
   const entriesFor = (openDetailsSectionKey?: string) =>

@@ -83,6 +83,77 @@ test("native cache upserts IDs, rejects stale state, isolates users/workers and 
   await page.close();
 });
 
+test("upgrading a warm transcript cache discards rows whose delivery ownership may be stale", async () => {
+  const page = await fixture();
+  try {
+    const result = await evaluate(page, async () => {
+      const cache = (window as any).cache;
+      const bootstrap = {
+        authenticated: true,
+        cacheScope: "a",
+        cacheExpiresAt: Date.now() + 60_000,
+      };
+      const notification = {
+        id: "100",
+        role: "assistant",
+        timestamp: Date.now(),
+        turnPhase: "final",
+        blocks: [{ type: "text", text: "Nightly backup failed" }],
+      };
+      const session = {
+        id: "1",
+        sessionId: "1",
+        totalMessageCount: 1,
+        messages: [],
+        activeTools: [],
+      };
+      const owner = JSON.stringify(["a", "1"]);
+      const json = JSON.stringify(notification);
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open(cache.installationStorageKey("main-reading-v1"), 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          db.createObjectStore("metadata").put(
+            {
+              epoch: null,
+              bootstrap,
+              session,
+              savedAt: Date.now(),
+              ranges: [{ first: [100, 0], last: [100, 0], complete: true }],
+            },
+            "current",
+          );
+          const messages = db.createObjectStore("messages", { keyPath: "id" });
+          messages.createIndex("order", "order", { unique: true });
+          messages.put({
+            id: JSON.stringify([owner, "100"]),
+            timestamp: notification.timestamp,
+            json,
+            bytes: new TextEncoder().encode(json).byteLength,
+            order: [owner, 100, 0],
+          });
+        };
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          request.result.close();
+          resolve();
+        };
+      });
+
+      const stale = await cache.readMainCache();
+      await cache.saveMainCache(bootstrap, {
+        ...session,
+        messages: [{ ...notification, directDelivery: { kind: "system" } }],
+      });
+      return { stale, fresh: (await cache.readMainCache())?.session.messages };
+    });
+    expect(result.stale).toBeUndefined();
+    expect(result.fresh).toMatchObject([{ id: "100", directDelivery: { kind: "system" } }]);
+  } finally {
+    await page.close();
+  }
+});
+
 test("logout in another tab cannot be undone by stale cache persistence", async () => {
   const context = await browser.newContext();
   const first = await context.newPage();

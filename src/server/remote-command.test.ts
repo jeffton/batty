@@ -1,4 +1,7 @@
 import { expect, test } from "vite-plus/test";
+import { join } from "node:path";
+import { openNodeSqliteDatabase } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { createHistoryIndex } from "./history-index";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { Type } from "typebox";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -253,7 +256,7 @@ test("remote reports and results persist only selected files; inspect and await 
 });
 
 test("node lifecycle queues in order, handles steering and resumes the same worker", async () => {
-  const { faux, orchestration, open, registry } = await fixture();
+  const { faux, orchestration, open, registry, directory } = await fixture();
   let entered = 0;
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -315,11 +318,13 @@ test("node lifecycle queues in order, handles steering and resumes the same work
         prompt: "too soon",
       }),
     ).toMatchObject({ isError: true });
-    await orchestration.nodeCommand("node-a", "steer", {
-      action: "steer",
-      sessionId: id,
-      prompt: "priority correction",
-    });
+    await orchestration.nodeCommand(
+      "node-a",
+      "tool:1234:5678",
+      { action: "steer", sessionId: id, prompt: "priority correction" },
+      undefined,
+      { instanceId: "office", label: "Office peer" },
+    );
     await orchestration.nodeCommand("node-a", "queue", {
       action: "queue",
       sessionId: id,
@@ -329,13 +334,30 @@ test("node lifecycle queues in order, handles steering and resumes the same work
     release();
   }
   await until(async () => (await orchestration.listRunning()).length === 0);
-  const results = (await entries(harness, id)).filter(
-    (entry) => entry.kind === "batty.remote-result",
-  );
+  const history = await entries(harness, id);
+  const results = history.filter((entry) => entry.kind === "batty.remote-result");
   expect(results.map((entry) => (entry.data as { text: string }).text)).toEqual([
     "steering handled",
     "queue handled",
   ]);
+  const steeringEntry = history.find((entry) =>
+    JSON.stringify(entry.model).includes("priority correction"),
+  )!;
+  const db = await openNodeSqliteDatabase(join(directory, "session.sqlite"));
+  try {
+    const index = await createHistoryIndex(db);
+    expect(await index.steeringSources(Number(id), [String(steeringEntry.id)])).toEqual([
+      {
+        entry: steeringEntry.id,
+        conversationId: main.id,
+        kind: "batty.node-command",
+        grantId: "node-a",
+        peerName: "Office peer",
+      },
+    ]);
+  } finally {
+    await db.close();
+  }
   expect(
     sessionId(
       await orchestration.nodeCommand("node-a", "resume", {

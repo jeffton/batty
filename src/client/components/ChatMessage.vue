@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { Cog, FileDiff, PanelRightOpen } from "@lucide/vue";
-import { computed } from "vue";
+import { computed, useId } from "vue";
 import { marked } from "marked";
 import { useCopyFeedback } from "@/client/lib/copy-feedback";
 import { isEmojiOnly } from "@/client/lib/emoji-only";
-import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
+import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE, STEERING_NOTICE_PREFIX } from "@/server/runtime-notices";
 import AgentTurnDiffPopover from "@/client/components/AgentTurnDiffPopover.vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
@@ -91,7 +91,7 @@ const assistantSegments = computed<AssistantSegment[]>(() => {
 
   const segments: AssistantSegment[] = [];
   const bubbleKind = props.message.turnPhase === "final" ? "reply" : "interim";
-  const silent = hasNoReplyText(props.message.blocks);
+  const silent = !props.message.directDelivery && hasNoReplyText(props.message.blocks);
 
   for (const block of props.message.blocks.filter(showAssistantBlock)) {
     // Sentinel text is diagnostic; image replies retain their actions and details control.
@@ -127,6 +127,21 @@ const runtimeNoticeContent = computed(() => {
     return undefined;
   }
   return props.message.data?.runtimeNotice as { text: string; markdown: string } | undefined;
+});
+
+const steeringPopoverId = `steering-sender-${useId()}`;
+const steering = computed(() => {
+  if (props.message.role !== "custom" || !props.message.steeringSender) return undefined;
+  const sender = props.message.steeringSender;
+  const name =
+    sender.kind === "agent"
+      ? (sender.name ?? `Agent ${sender.sessionId}`)
+      : (sender.name ?? "Batty");
+  return {
+    name,
+    sessionId: sender.kind === "agent" ? sender.sessionId : undefined,
+    body: props.message.text.slice(STEERING_NOTICE_PREFIX.length),
+  };
 });
 
 const cronNoticeDetails = computed(() => {
@@ -302,7 +317,30 @@ async function copyAssistantMarkdown(): Promise<void> {
           <Cog :size="16" />
         </span>
         <div class="message__text">
-          <template v-if="isRuntimeNotice">
+          <template v-if="steering">
+            <div class="message__notice-actions message__steering-header">
+              <span>Steering from</span>
+              <button
+                v-if="props.allowSessionPopovers && steering.sessionId"
+                type="button"
+                class="message__notice-btn"
+                :popovertarget="steeringPopoverId"
+                :aria-label="`Open session: ${steering.name}`"
+              >
+                <PanelRightOpen :size="14" aria-hidden="true" />
+                {{ steering.name }}
+              </button>
+              <strong v-else>{{ steering.name }}</strong>
+              <SubagentSessionPopover
+                v-if="props.allowSessionPopovers && steering.sessionId"
+                :popover-id="steeringPopoverId"
+                :header-title="steering.name"
+                :session-id="steering.sessionId"
+              />
+            </div>
+            <div class="message__notice-text">{{ steering.body }}</div>
+          </template>
+          <template v-else-if="isRuntimeNotice">
             <div class="message__notice-text">
               {{ runtimeNoticeContent?.text ?? props.message.text }}
             </div>
@@ -678,6 +716,14 @@ async function copyAssistantMarkdown(): Promise<void> {
   border-radius: 0.5rem;
   background: var(--color-info-soft);
   color: var(--color-info);
+}
+
+.message__steering-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
 }
 
 .message__notice-text {

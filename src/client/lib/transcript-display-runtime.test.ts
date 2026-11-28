@@ -1,6 +1,8 @@
 import { expect, test } from "vite-plus/test";
 import { buildTranscriptDisplayEntries } from "./transcript-display";
 import { buildToolStateLookup, buildTranscriptMessages } from "./transcript";
+import { normalizeMessage } from "@/server/pi-state";
+import { encodeRuntimeNotice } from "@/server/runtime-notices";
 import type { UiMessage } from "@/shared/types";
 
 // The main transcript around subagent 146858: another worker's result arrived
@@ -120,7 +122,7 @@ function directReply(id: string, text: string): UiMessage {
     timestamp: Number(id),
     turnPhase: "final",
     blocks: [{ type: "text", text }],
-    directDelivery: { sessionId: `worker-${id}`, runId: `run-${id}` },
+    directDelivery: { kind: "cron", sessionId: `worker-${id}`, runId: `run-${id}` },
   };
 }
 
@@ -218,6 +220,58 @@ test.each(["cron", "subagent"])(
     });
   },
 );
+
+test("a system delivery between assistant rounds never owns reply or cron details", () => {
+  const notification = normalizeMessage(
+    {
+      role: "user",
+      timestamp: 8,
+      content: encodeRuntimeNotice({
+        kind: "system",
+        text: "System notification already delivered to the user; do not resend.\nBackup failed",
+        data: { directDelivery: { text: "Backup failed" } },
+      }),
+    },
+    0,
+  )!;
+  const cron = directReply("596412", "Independent cron result");
+  const messages = [...runtimeMessages.slice(0, 5), notification, cron];
+  const controls = (entries: ReturnType<typeof display>) =>
+    entries.flatMap((entry) =>
+      entry.kind === "message" && entry.entry.message.role === "assistant"
+        ? [[entry.entry.message.id, entry.detailsToggle?.sectionKey]]
+        : [],
+    );
+  expect(controls(display(messages))).toEqual([
+    ["146874", "turn:146845"],
+    [notification.id, undefined],
+    ["596412", "turn:596412"],
+  ]);
+
+  const interleaved = [...messages.slice(0, 4), notification, cron];
+  const running = display(interleaved, { isStreaming: true });
+  expect(JSON.stringify(running)).toContain("Header spacing task");
+  expect(controls(running)).toEqual([
+    ["146855", undefined],
+    [notification.id, undefined],
+    ["596412", "turn:596412"],
+  ]);
+
+  const finished = [...interleaved, ...runtimeMessages.slice(4)];
+  const replyOpen = display(finished, { openDetailsSectionKey: "turn:146845" });
+  expect(JSON.stringify(replyOpen)).toContain("Header spacing task");
+  expect(JSON.stringify(replyOpen)).not.toContain("Spacing deployed");
+  expect(JSON.stringify(replyOpen)).not.toContain('"id":"596412:delivery"');
+  const cronOpen = display(finished, { openDetailsSectionKey: "turn:596412" });
+  expect(JSON.stringify(cronOpen)).toContain('"id":"596412:delivery"');
+  expect(JSON.stringify(cronOpen)).not.toContain("Header spacing task");
+  expect(controls(cronOpen)).toEqual([
+    [notification.id, undefined],
+    ["596412", "turn:596412"],
+    ["146874", "turn:146845"],
+    ["147053", "turn:147048"],
+  ]);
+});
 
 test("always-show details includes each direct delivery's source session", () => {
   const entries = display([directReply("596412", "Direct result")], { alwaysShowDetails: true });

@@ -40,7 +40,7 @@ test("owner's local notification commits a visible reply and push exactly once w
     const results = await Promise.all([send(), send()]);
     expect(results.map((result) => result.json().published).sort()).toEqual([false, true]);
     expect(entryMessages((await main.context(context)).entries)).toMatchObject([
-      { role: "assistant", blocks: [{ type: "text", text }] },
+      { role: "assistant", directDelivery: { kind: "system" }, blocks: [{ type: "text", text }] },
     ]);
     await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
     expect(notify.mock.calls[0]![0].messages).toMatchObject([

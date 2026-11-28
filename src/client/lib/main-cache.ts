@@ -168,9 +168,14 @@ async function open(): Promise<IDBDatabase> {
 function openConnection(): Promise<IDBDatabase> {
   if (database) return database;
   const pending = new Promise<IDBDatabase>((resolve, reject) => {
-    const operation = indexedDB.open(DB_NAME, 2);
-    operation.onupgradeneeded = () => {
+    const operation = indexedDB.open(DB_NAME, 3);
+    operation.onupgradeneeded = (event) => {
       const db = operation.result;
+      if (event.oldVersion > 0) {
+        // A stale projection must not resume at its saved history cursor.
+        db.deleteObjectStore("metadata");
+        db.deleteObjectStore("messages");
+      }
       db.createObjectStore("metadata");
       db.createObjectStore("messages", { keyPath: "id" }).createIndex("order", "order", {
         unique: true,

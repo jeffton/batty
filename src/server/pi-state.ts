@@ -307,9 +307,10 @@ export function normalizeMessage(
           timestamp: message.timestamp,
           turnPhase: "final",
           stopReason: "stop",
-          ...(notice.kind === "cron"
-            ? { directDelivery: notice.data!.cron as { sessionId: string; runId: string } }
-            : {}),
+          directDelivery:
+            notice.kind === "cron"
+              ? { kind: "cron", ...(notice.data!.cron as { sessionId: string; runId: string }) }
+              : { kind: "system" },
           blocks: [{ type: "text", text: direct.text }],
           sentFiles: presentation?.sentFiles,
           sites: presentation?.sites?.map(decodeSiteAttachmentDescriptor),

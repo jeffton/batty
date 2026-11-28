@@ -408,16 +408,28 @@ export class RemoteWorkers {
     )
       return false;
 
-    const connection = this.connection(mirror.node);
-    const { events } = await this.requestNode(
-      connection,
-      "node.session.watch",
-      { sessionId: mirror.session, after: "0" },
-      { signal },
-    );
-    const refreshed = await refreshTranscriptProjection(mirror, connection.label, events!);
-    if (refreshed) await this.persistMirror(mirror);
-    return refreshed;
+    try {
+      const connection = this.connection(mirror.node);
+      const { events } = await this.requestNode(
+        connection,
+        "node.session.watch",
+        { sessionId: mirror.session, after: "0" },
+        { signal },
+      );
+      const refreshed = await refreshTranscriptProjection(mirror, connection.label, events!);
+      delete mirror.projectionError;
+      if (refreshed) await this.persistMirror(mirror);
+      return refreshed;
+    } catch (error) {
+      signal.throwIfAborted();
+      if (
+        !(error instanceof RpcError) ||
+        !["OFFLINE", "TIMEOUT", "NOT_FOUND", "UNAUTHORIZED", "FORBIDDEN"].includes(error.code)
+      )
+        throw error;
+      mirror.projectionError = error.message;
+      return false;
+    }
   }
   async stop(id: string) {
     const parsed = parseRemoteSession(id);
@@ -519,6 +531,8 @@ export class RemoteWorkers {
         : candidates.slice(0, 120);
     const moreRecent = includeHistory && after !== undefined && candidates.length > messages.length;
     const cursor = moreRecent ? messages.at(-1)!.id.split(":")[0] : mirror.after;
+    const remoteError =
+      mirror.projectionError ?? (mirror.syncedTerminal ? undefined : mirror.error);
     return {
       ...mirror.state,
       streamId: this.runtime.streamId,
@@ -530,9 +544,9 @@ export class RemoteWorkers {
       title: `Subagent · ${mirror.node}`,
       remote: {
         nodeId: mirror.node,
-        connectionState: mirror.error && !mirror.syncedTerminal ? "offline" : "online",
+        connectionState: remoteError ? "offline" : "online",
         status: mirror.summary.status,
-        ...(mirror.error && !mirror.syncedTerminal ? { error: mirror.error } : {}),
+        ...(remoteError ? { error: remoteError } : {}),
       },
       messages,
       totalMessageCount: mirror.messages.length,
@@ -541,7 +555,8 @@ export class RemoteWorkers {
       historyAfter: after,
       historyCursor: includeHistory ? cursor : undefined,
       canStopSubagent: !mirror.error && !mirror.syncedTerminal && mirror.state.canStopSubagent,
-      canReply: Boolean(this.access.getConnection(mirror.node)) && mirror.state.canReply,
+      canReply:
+        !remoteError && Boolean(this.access.getConnection(mirror.node)) && mirror.state.canReply,
       ...(mirror.syncedTerminal
         ? {
             isStreaming: false,

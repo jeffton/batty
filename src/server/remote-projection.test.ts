@@ -11,6 +11,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { TranscriptImages } from "./transcript-images";
 import type { ServerEvent, SessionState } from "../shared/types";
 import { applyServerEvent } from "../client/lib/session-events";
+import { RpcError } from "../shared/rpc";
 
 function sourceState(revision: number, text: string): SessionState {
   return {
@@ -411,8 +412,14 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
         },
       }),
     }));
+    request.mockRejectedValueOnce(new RpcError("NOT_FOUND", "Peer retired this worker"));
     Object.defineProperty(remotes, "requestNode", { value: request });
     const signal = new AbortController().signal;
+    expect(await remotes.refreshTranscript("remote:work:123", signal)).toBe(false);
+    expect(remotes.state("remote:work:123")).toMatchObject({
+      messages: [{ id: "100", text: "completed" }],
+      remote: { connectionState: "offline", error: "Peer retired this worker" },
+    });
     expect(await remotes.refreshTranscript("remote:work:123", signal)).toBe(true);
     expect(request).toHaveBeenCalledWith(
       expect.objectContaining({ id: "work" }),
@@ -434,7 +441,7 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
     });
     expect(JSON.parse(await readFile(file, "utf8")).projectionReady).toBe(true);
     expect(await remotes.refreshTranscript("remote:work:123", signal)).toBe(false);
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(2);
   } finally {
     await remotes.close();
     await rm(root, { recursive: true, force: true });

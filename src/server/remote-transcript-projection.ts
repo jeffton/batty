@@ -18,6 +18,7 @@ export type RemoteMirror = {
   error?: string;
   syncedTerminal?: boolean;
   projectionReady?: true;
+  projectionError?: string;
 };
 
 export function projectRemoteSender(

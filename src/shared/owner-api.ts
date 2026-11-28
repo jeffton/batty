@@ -25,6 +25,7 @@ export interface OwnerInputs {
   "session.resources": { sessionId: string };
   "session.subagents": { sessionId: string };
   "session.stop": { sessionId: string };
+  "session.reply": { sessionId: string; text: string; clientMessageId: string };
   "session.watch": { sessionId: string; after?: string };
   "main.submit": {
     kind: "prompt" | "steer";
@@ -121,6 +122,7 @@ export interface OwnerOutputs {
   "session.resources": Ui.SessionResourcesResponse;
   "session.subagents": Ui.RunningSubagent[];
   "session.stop": { ok: true };
+  "session.reply": { ok: true };
   "session.watch": Record<string, never>;
   "main.submit": { disposition: "started" | "queued"; submissionId: string; sessionId: string };
   "main.stop": { ok: true };

@@ -365,6 +365,7 @@ export interface SessionState {
   title?: string;
   isSubagentSession?: boolean;
   canStopSubagent?: boolean;
+  canReply?: boolean;
   isCronSession?: boolean;
 }
 

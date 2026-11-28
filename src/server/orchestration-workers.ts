@@ -750,7 +750,7 @@ export function createWorkers(
             ...(presentation && receipt?.joinPresentationTask === api.taskId
               ? { presentation: presentation as unknown as JsonValue }
               : {}),
-          },
+          } as JsonValue,
         };
       }
       if (args.action === "await")

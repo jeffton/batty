@@ -313,6 +313,17 @@ export function registerRemoteWorkerExecutionTests() {
         expect(bModelCalls).toBe(2);
         expect(await transcript(local.runtime)).toContain("Awaiting subagent");
         const remoteId = local.runtime.remotes.list()[0]!.sessionId.split(":")[2]!;
+        expect((await remote.runtime.state(remoteId)).messages).toContainEqual(
+          expect.objectContaining({
+            role: "custom",
+            transferKind: "assignment",
+            steeringSender: expect.objectContaining({ kind: "peer" }),
+            transferOrigin: expect.objectContaining({
+              instanceId: local.runtime.remotes.access.identity().instanceId,
+              actor: { kind: "main", sessionId: String(local.runtime.main.id) },
+            }),
+          }),
+        );
         const workerContext = (await (await remote.runtime.conversation(remoteId)).context(context))
           .messages;
         const reportReply = workerContext.find(

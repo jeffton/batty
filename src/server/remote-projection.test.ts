@@ -382,6 +382,59 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
     });
     // Rendering normalization does not mutate the source snapshot or archive.
     expect(JSON.parse(await readFile(file, "utf8")).state.isStreaming).toBe(true);
+
+    expect(await remotes.refreshTranscript("remote:work:123", AbortSignal.abort())).toBe(false);
+    vi.spyOn(remotes.reverse, "status").mockReturnValue({ state: "connected" });
+    const request = vi.fn(async () => ({
+      events: new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            type: "reset",
+            state: {
+              ...sourceState(2, "ignored live fields"),
+              canReply: true,
+              historyCursor: "100",
+              messages: [
+                {
+                  id: "100",
+                  role: "custom",
+                  customType: "result",
+                  timestamp: 1,
+                  text: "completed",
+                  transferKind: "result",
+                  steeringSender: { kind: "agent", sessionId: "42" },
+                },
+              ],
+            },
+          });
+          controller.close();
+        },
+      }),
+    }));
+    Object.defineProperty(remotes, "requestNode", { value: request });
+    const signal = new AbortController().signal;
+    expect(await remotes.refreshTranscript("remote:work:123", signal)).toBe(true);
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "work" }),
+      "node.session.watch",
+      { sessionId: "123", after: "0" },
+      { signal },
+    );
+    expect(remotes.state("remote:work:123")).toMatchObject({
+      canReply: true,
+      historyCursor: "100",
+      isStreaming: false,
+      messages: [
+        {
+          id: "100",
+          text: "completed",
+          steeringSender: { kind: "agent", sessionId: "remote:work:42" },
+        },
+      ],
+    });
+    expect(JSON.parse(await readFile(file, "utf8")).projectionReady).toBe(true);
+    expect(await remotes.refreshTranscript("remote:work:123", signal)).toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
   } finally {
     await remotes.close();
     await rm(root, { recursive: true, force: true });

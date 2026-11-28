@@ -36,15 +36,18 @@ import { encodeRuntimeNotice } from "./runtime-notices";
 import { ArtifactResolver } from "./artifact-resolver";
 import { describePresentation } from "./message-presentation";
 import { nodeSessionEvent } from "./remote-presentation";
+import {
+  parseRemoteSession,
+  projectRemoteSender,
+  refreshTranscriptProjection,
+  remoteSessionId,
+  type RemoteMirror as Mirror,
+} from "./remote-transcript-projection";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
 import { storeSentFiles } from "./send-files";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 
-export const remoteSessionId = (node: string, session: string) => `remote:${node}:${session}`;
-export function parseRemoteSession(id: string) {
-  const match = /^remote:([a-zA-Z0-9_-]+):(\d+)$/.exec(id);
-  return match ? { node: match[1]!, session: match[2]! } : undefined;
-}
+export { parseRemoteSession, remoteSessionId } from "./remote-transcript-projection";
 export type RemoteWorkerSummary = NodeWorkerSummary;
 
 function qualifiedWorker(node: string, worker: RemoteWorkerSummary) {
@@ -55,16 +58,6 @@ function qualifiedWorker(node: string, worker: RemoteWorkerSummary) {
     nodeId: node,
   };
 }
-type Mirror = {
-  node: string;
-  session: string;
-  summary: RemoteWorkerSummary;
-  state?: SessionState;
-  after?: string;
-  messages: UiMessage[];
-  error?: string;
-  syncedTerminal?: boolean;
-};
 type Assignment = {
   node: string;
   requestId: string;
@@ -280,6 +273,8 @@ export class RemoteWorkers {
               (a, b) => Number(a.id.split(":")[0]) - Number(b.id.split(":")[0]),
             );
             mirror.state = { ...state, messages: [] };
+            if ((!mirror.after || mirror.after === "0") && state.canReply !== undefined)
+              mirror.projectionReady = true;
             // Deliver before advancing the durable cursor. Remote request IDs deduplicate after a local crash.
             for (const message of state.messages) await this.deliver(mirror, message);
             controller.signal.throwIfAborted();
@@ -402,6 +397,27 @@ export class RemoteWorkers {
     const connection = this.access.getConnection(node);
     if (!connection) throw new RpcError("NOT_FOUND", `Unknown remote instance: ${node}`);
     return connection;
+  }
+  async refreshTranscript(id: string, signal: AbortSignal): Promise<boolean> {
+    const mirror = this.mirrors.get(id);
+    if (
+      !mirror?.state ||
+      mirror.projectionReady ||
+      !mirror.after ||
+      this.reverse.status(mirror.node).state !== "connected"
+    )
+      return false;
+
+    const connection = this.connection(mirror.node);
+    const { events } = await this.requestNode(
+      connection,
+      "node.session.watch",
+      { sessionId: mirror.session, after: "0" },
+      { signal },
+    );
+    const refreshed = await refreshTranscriptProjection(mirror, connection.label, events!);
+    if (refreshed) await this.persistMirror(mirror);
+    return refreshed;
   }
   async stop(id: string) {
     const parsed = parseRemoteSession(id);
@@ -891,31 +907,7 @@ export class RemoteWorkers {
       };
     }
     if (message.role !== "custom") return message;
-    const sender = message.steeringSender;
-    if (message.transferOrigin) {
-      // The connected peer can vouch for its own sender sessions, not for IDs
-      // on a third installation (including this one).
-      message = {
-        ...message,
-        steeringSender: { kind: "peer", name: message.transferOrigin.label },
-      };
-    } else if (sender?.kind === "main") {
-      message = { ...message, steeringSender: { kind: "main", name: this.connection(node).label } };
-    } else if (sender?.kind === "agent" && /^\d+$/.test(sender.sessionId)) {
-      message = {
-        ...message,
-        steeringSender: {
-          kind: "agent",
-          sessionId: remoteSessionId(node, sender.sessionId),
-          name: `Agent ${sender.sessionId} · ${this.connection(node).label}`,
-        },
-      };
-    } else if (sender?.kind === "agent") {
-      message = {
-        ...message,
-        steeringSender: { kind: "peer", name: sender.name ?? sender.sessionId },
-      };
-    }
+    message = projectRemoteSender(message, node, this.connection(node).label);
     if (!message.data) return message;
     const key = message.customType.startsWith("batty-runtime-notice:")
       ? "runtimePresentation"

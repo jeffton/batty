@@ -66,10 +66,17 @@ export function createSessionOperations(
   const { config } = runtime;
   const { transcriptImages: images, webPush } = services;
   const { operations, add, streaming } = rpcRegistry<OwnerInputs, OwnerOutputs, OwnerEvents>();
-  add("session.get", async (input) =>
-    images.state(await runtime.state(input.sessionId, undefined, true, input.after)),
-  );
-  add("session.messages", async (input) => {
+  add("session.get", async (input, rpc) => {
+    const refreshed =
+      parseRemoteSession(input.sessionId) &&
+      (await runtime.remotes.refreshTranscript(input.sessionId, rpc.signal));
+    return images.state(
+      await runtime.state(input.sessionId, undefined, true, refreshed ? undefined : input.after),
+    );
+  });
+  add("session.messages", async (input, rpc) => {
+    if (parseRemoteSession(input.sessionId))
+      await runtime.remotes.refreshTranscript(input.sessionId, rpc.signal);
     const page = await runtime.messages(input.sessionId, input.before, input.limit);
     return { ...page, messages: await images.messages(page.messages) };
   });
@@ -147,7 +154,10 @@ export function createSessionOperations(
   streaming("session.watch", async ({ sessionId, after }, rpc) => {
     const remote = parseRemoteSession(sessionId);
     const conversation = remote ? undefined : await runtime.conversation(sessionId);
-    if (remote) await runtime.state(sessionId);
+    if (remote) {
+      if (await runtime.remotes.refreshTranscript(sessionId, rpc.signal)) after = undefined;
+      await runtime.state(sessionId);
+    }
     const main = conversation?.id === runtime.main.id;
     return {
       value: {},
